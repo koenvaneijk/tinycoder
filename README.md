@@ -21,11 +21,17 @@ It allows you to add .py files to a chat context, ask questions, request code ch
 ## Installation
 
 ```bash
-pip install .
+# Straight from GitHub:
+python3 -m pip install git+https://github.com/koenvaneijk/tinycoder.git
+
+# Clone first
+git clone https://github.com/koenvaneijk/tinycoder.git
+cd tinycoder
+python3 -m pip install .
+
 # Or for development:
-pip install -e .
-# Or straight from GitHub:
-pip install git+https://github.com/koenvaneijk/tinycoder.git
+python3 -m pip install -e .
+
 ```
 
 
