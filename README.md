@@ -2,7 +2,7 @@
 
 TinyCoder is a zero dependencies, pure Python, simplified, command-line AI coding assistant designed to help you interact with Large Language Models (LLMs) for coding tasks directly within your terminal and integrated with your Git workflow.
 
-It allows you to add files to a chat context, ask questions, request code changes, and have the assistant apply those changes using a specific diff-like format.
+It allows you to add .py files to a chat context, ask questions, request code changes, and have the assistant apply those changes using a specific diff-like format.
 
 ## Features
 
