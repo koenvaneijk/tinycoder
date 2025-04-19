@@ -14,13 +14,16 @@ from tinycoder.utils import print_color
 from tinycoder.git import GitManager
 from tinycoder.repomap import RepoMap
 from tinycoder.files import FileManager
+from tinycoder.commands import CommandHandler
+from tinycoder.edit_parser import EditParser # Import new class
+from tinycoder.code_applier import CodeApplier # Import new class
 
 # --- Configuration ---
 APP_NAME = "tinycoder"
 HISTORY_FILE = ".tinycoder.chat.history.md"
 COMMIT_PREFIX = "tinycoder: "
 
-# --- Prompts ---
+# --- Prompts ---s
 # Load prompts using importlib.resources to work when installed as a package
 try:
     with importlib.resources.files(__package__).joinpath('prompts/system_prompt_base.md').open('r', encoding='utf-8') as f:
@@ -74,7 +77,37 @@ class App:
         self.coder_commits: Set[str] = set() # tinycoder still tracks its own commits
         self.mode = "code"
         self.repo_map = RepoMap(self.git_root, self._print_error_internal) # Pass internal error printer
-        self.lint_errors_found: Dict[str, str] = {}
+
+        # Instantiate CommandHandler
+        self.command_handler = CommandHandler(
+            file_manager=self.file_manager,
+            git_manager=self.git_manager,
+            # Pass functions/lambdas for dependencies
+            clear_history_func=lambda: self.chat_history.clear(), # Simple clear for now
+            write_history_func=self._write_chat_history,
+            print_info=self._print_info_internal,
+            print_error=self._print_error_internal,
+            get_mode=lambda: self.mode,
+            set_mode=lambda mode: setattr(self, 'mode', mode),
+            git_commit_func=self._git_add_commit,
+            git_undo_func=self._git_undo,
+            app_name=APP_NAME,
+        )
+
+        # Instantiate EditParser and CodeApplier
+        self.edit_parser = EditParser(
+            print_warning=self._print_warning_internal,
+            fnames_provider=self.file_manager.get_files # Pass method reference
+        )
+        self.code_applier = CodeApplier(
+            file_manager=self.file_manager,
+            git_manager=self.git_manager,
+            input_func=input, # Use built-in input
+            print_info=self._print_info_internal,
+            print_error=self._print_error_internal,
+        )
+
+        self.lint_errors_found: Dict[str, str] = {} # Still managed by App for reflection loop
         self.reflected_message: Optional[str] = None # To store messages for reflection (like lint errors)
 
         # ANSI color map
@@ -84,6 +117,7 @@ class App:
             "tool": "yellow",
             "error": "red",
             "info": "cyan",
+            "warning": "yellow", # Add warning color
         }
 
         if not self.git_root:
@@ -108,8 +142,12 @@ class App:
         self._print("error", text)
 
     def _print_info_internal(self, text: str):
-        """Internal helper for FileManager to print info."""
+        """Internal helper for FileManager/CodeApplier to print info."""
         self._print("info", text)
+
+    def _print_warning_internal(self, text: str):
+        """Internal helper for EditParser to print warnings."""
+        self._print("warning", text) # Assuming 'warning' color exists or defaults
 
     def _add_to_history(self, role: str, content: str):
         """Adds a message to the chat history."""
@@ -160,12 +198,6 @@ class App:
             self._print("info", f"Loaded ~{len(self.chat_history)} messages from {HISTORY_FILE} (basic parsing)")
         except Exception as e:
             self._print("error", f"Could not load/parse history file {HISTORY_FILE}: {e}")
-
-    # --- File operations moved to FileManager ---
-    # get_abs_path
-    # _get_file_content_for_llm
-    # add_file
-    # drop_file
 
     def _build_system_prompt(self) -> str:
         """Builds the system prompt including file list and repo map."""
@@ -271,299 +303,6 @@ class App:
             self._print("error", f"An unexpected error occurred preparing for or handling LLM API call ({self.client.__class__.__name__}): {e}")
             # Print traceback for debugging unexpected issues
             traceback.print_exc()
-            return None
-
-
-    def _parse_edits(self, response: str) -> List[Tuple[str, str, str]]:
-        """Parses diff/diff-fenced edit blocks from the LLM response."""
-        edits = []
-        # Regex for the inner SEARCH/REPLACE structure
-        edit_block_pattern = re.compile(
-            r"<<<<<<< SEARCH\s*\n([\s\S]*?)\n=======\s*\n([\s\S]*?)\n>>>>>>> REPLACE",
-            re.DOTALL
-        )
-
-        # Regex for code blocks (```lang\n...\n```)
-        # Make language optional? No, stick to python/diff for now as per prompt.
-        code_block_pattern = re.compile(
-            r"```(?:python|diff)\s*\n([\s\S]*?)\n```",
-            re.DOTALL
-        )
-
-        # Find all potential code blocks first
-        potential_code_blocks = code_block_pattern.finditer(response)
-
-        # Keep track of the end position of the last processed match to avoid overlap/double matching filename
-        last_pos = 0
-
-        for code_match in potential_code_blocks:
-            code_content_full = code_match.group(1) # Content inside ```...```
-            code_block_start, code_block_end = code_match.span()
-
-            # Check if this block contains the SEARCH/REPLACE markers
-            # Use search instead of finditer if we only expect one edit per block (safer assumption?)
-            # No, LLM might provide multiple edits for one file in one block. Stick with finditer.
-            inner_matches_found = list(edit_block_pattern.finditer(code_content_full))
-            if not inner_matches_found:
-                continue # This code block doesn't contain edits, skip
-
-            # --- Determine the filename ---
-            fname = None
-            code_content_for_edits = code_content_full # Default content for parsing edits
-
-            # Case 1: Filename is the first line *inside* the code block
-            lines = code_content_full.split('\n', 1)
-            first_line_inside = lines[0].strip()
-            # Basic check: does it look like a path? (contains / or \ or ends with common extension)
-            # Avoid matching keywords like 'python' or the SEARCH marker itself
-            # Also check it's not empty
-            if first_line_inside and \
-               not first_line_inside.startswith("<<<<<<< SEARCH") and \
-               first_line_inside not in {"python", "diff"} and \
-               ('/' in first_line_inside or '\\' in first_line_inside or '.' in first_line_inside):
-                 # Check if the *rest* of the content contains the edit block start marker
-                 # This ensures the first line IS the filename and not part of the search block
-                 if len(lines) > 1 and edit_block_pattern.search(lines[1]):
-                     fname = first_line_inside
-                     # Adjust content to exclude the filename line for inner parsing
-                     code_content_for_edits = lines[1]
-                     # Re-run inner matches on the adjusted content
-                     inner_matches_found = list(edit_block_pattern.finditer(code_content_for_edits))
-
-
-            # Case 2: Filename is on the line *before* the code block
-            if fname is None:
-                # Search backwards from the start of the code block in the original response
-                # Ensure we don't re-read text processed by previous block matches
-                search_start = response.rfind('\n', 0, code_block_start) + 1 # Start of the line before the block
-                if search_start < last_pos: # Avoid overlap with previous matches/filenames
-                     search_start = last_pos
-
-                preceding_text = response[search_start:code_block_start]
-                lines_before = preceding_text.strip().split('\n')
-                if lines_before:
-                    last_line_before = lines_before[-1].strip()
-                    # Basic check: does it look like a path?
-                    if last_line_before and \
-                       last_line_before not in {"python", "diff"} and \
-                       ('/' in last_line_before or '\\' in last_line_before or '.' in last_line_before):
-                        fname = last_line_before
-                        # Use the original full content for inner parsing
-                        code_content_for_edits = code_content_full
-                        # Reset inner matches based on full content (already done above)
-                        inner_matches_found = list(edit_block_pattern.finditer(code_content_for_edits))
-
-
-            # --- If filename is still undetermined ---
-            if fname is None:
-                 # Fallback or Warning
-                 self._print("warning", f"Could not determine filename for edit block:\n```\n{code_content_full[:100]}...\n```")
-                 # Option: Default to first file in chat?
-                 if self.fnames:
-                     fname = list(sorted(self.fnames))[0] # Use sorted list for determinism
-                     self._print("warning", f"Assuming edit applies to the first file in chat: {fname}")
-                     code_content_for_edits = code_content_full # Use original content
-                     # Reset inner matches based on full content
-                     inner_matches_found = list(edit_block_pattern.finditer(code_content_for_edits))
-                 else:
-                     self._print("error", "Cannot apply edit block - no filename found and no files in chat.")
-                     continue # Skip this block
-
-            # --- Extract edits using the determined content ---
-            if fname: # Ensure filename was found or defaulted
-                for match in inner_matches_found: # Use the potentially updated inner_matches
-                    search_block, replace_block = match.groups()
-                    edits.append((fname, search_block, replace_block))
-
-            # Update last position to prevent the next iteration from re-parsing this block's preceding line
-            last_pos = code_block_end
-
-
-        # Post-process all found edits (same as before)
-        processed_edits = []
-        for fname, search_block, replace_block in edits:
-             # Normalize line endings to LF for comparison and application
-             search_block = search_block.replace('\r\n', '\n')
-             replace_block = replace_block.replace('\r\n', '\n')
-
-             # Handle case where replace_block is meant to be empty (deletion)
-             if replace_block.strip() == "":
-                  replace_block = "" # Explicitly empty
-
-             processed_edits.append((fname.strip(), search_block, replace_block))
-
-        return processed_edits
-
-    def _lint_python_compile(self, abs_path: Path, content: str) -> Optional[str]:
-        """Checks python syntax using compile(). Returns error string or None."""
-        try:
-            compile(content, str(abs_path), "exec")
-            return None
-        except (SyntaxError, ValueError) as err: # Catch ValueError for null bytes etc.
-            # Format traceback similar to Coder's linter
-            tb_lines = traceback.format_exception(type(err), err, err.__traceback__)
-
-            # Find the start of the traceback relevant to the compile error
-            traceback_marker = "Traceback (most recent call last):"
-            relevant_lines = []
-            in_relevant_section = False
-            for line in tb_lines:
-                if traceback_marker in line:
-                    in_relevant_section = True
-                if in_relevant_section:
-                    # Exclude the frame pointing to our internal compile() call
-                    if 'compile(content, str(abs_path), "exec")' not in line:
-                         relevant_lines.append(line)
-
-            # If we couldn't filter properly, return the whole traceback
-            if not relevant_lines or not any(str(abs_path) in line for line in relevant_lines):
-                 formatted_error = "".join(tb_lines)
-            else:
-                 formatted_error = "".join(relevant_lines)
-
-            return f"Syntax error in {abs_path.name}:\n```\n{formatted_error}\n```"
-
-
-    def _apply_edits(self, edits: List[Tuple[str, str, str]]) -> bool:
-        """Applies the parsed edits to the files."""
-        applied_edit_to_at_least_one_file = False
-        failed_edits = []
-        edited_py_files: Dict[str, str] = {} # Store {fname: new_content} for linting
-        applied_files: Set[str] = set() # Track relative paths of files edited
-
-        for i, (fname, search_block, replace_block) in enumerate(edits):
-            abs_path = self.file_manager.get_abs_path(fname) # Use FileManager
-            if not abs_path:
-                 # Error printed by get_abs_path
-                 failed_edits.append(i)
-                 continue
-
-            # Ensure file is in chat context or get confirmation
-            # Determine relative path for checking `self.fnames`
-            git_root_path = Path(self.git_manager.get_root()) if self.git_manager.is_repo() else None
-            base_path = git_root_path if git_root_path else Path.cwd()
-            try:
-                 rel_path_check = str(abs_path.relative_to(base_path))
-            except ValueError:
-                 rel_path_check = str(abs_path) # Use absolute if not relative to base
-
-            # Use FileManager to check if file is in context
-            if rel_path_check not in self.file_manager.get_files():
-                 confirm = input(f"LLM wants to edit '{rel_path_check}' which is not in the chat. Allow? (y/N): ")
-                 if confirm.lower() == 'y':
-                     # Use the original fname the user might have typed, or the resolved relative path
-                     self.file_manager.add_file(fname) # Use FileManager
-                     # Re-check if adding succeeded (it might fail if file doesn't exist and user says no)
-                     if rel_path_check not in self.file_manager.get_files():
-                           self._print("error", f"Could not add '{fname}' for editing.")
-                           failed_edits.append(i)
-                           continue
-                 else:
-                     self._print("info", f"Skipping edit for {fname}.")
-                     failed_edits.append(i)
-                     continue
-
-            is_new_file = not abs_path.exists() or (search_block == "" and (not abs_path.exists() or abs_path.stat().st_size == 0))
-
-            if is_new_file:
-                 if search_block != "":
-                      self._print("error", f"Edit for new file {fname} has a non-empty SEARCH block. Skipping.")
-                      failed_edits.append(i)
-                      continue
-                 self._print("info", f"Creating and writing new file {rel_path_check}")
-                 # Use FileManager to write the new file
-                 if self.file_manager.write_file(abs_path, replace_block):
-                     applied_edit_to_at_least_one_file = True
-                     applied_files.add(rel_path_check) # Track new file
-                     if abs_path.suffix == '.py': # Lint new python files too
-                         edited_py_files[rel_path_check] = replace_block
-                 else:
-                     # Error printed by write_file
-                     failed_edits.append(i)
-                 continue # Move to next edit
-
-            # --- Existing file logic ---
-            try:
-                # Use FileManager to read the file
-                original_content = self.file_manager.read_file(abs_path)
-                if original_content is None:
-                    # Error printed by read_file
-                    failed_edits.append(i)
-                    continue
-
-                original_content_normalized = original_content.replace('\r\n', '\n')
-
-                # The search needs to be exact.
-                if search_block not in original_content_normalized:
-                    self._print("error", f"SEARCH block not found exactly in {fname}. Edit {i+1} failed.")
-                    # Provide context for debugging
-                    # print(f"---EXPECTED (SEARCH)---\n{search_block}\n-----------------------")
-                    # print(f"---ACTUAL (CONTENT抜粋)---\n{original_content_normalized[max(0, original_content_normalized.find(search_block[:20])-50):original_content_normalized.find(search_block[:20])+len(search_block)+50]}\n-----------------------")
-                    failed_edits.append(i)
-                    continue
-
-                # Perform the replacement
-                new_content_normalized = original_content_normalized.replace(search_block, replace_block, 1)
-
-                # Restore original line endings
-                if '\r\n' in original_content:
-                    new_content = new_content_normalized.replace('\n', '\r\n')
-                else:
-                    new_content = new_content_normalized # This line might be redundant now, but keep for context
-
-                # Only write if content actually changed (normalized comparison)
-                # Note: write_file handles line ending restoration
-                if new_content_normalized != original_content_normalized:
-                    # Use FileManager to write the file
-                    if self.file_manager.write_file(abs_path, new_content_normalized):
-                        self._print("info", f"Applied edit {i+1} to {rel_path_check}")
-                        applied_edit_to_at_least_one_file = True
-                        applied_files.add(rel_path_check)
-                        # Store normalized content for linting if it's a python file
-                        if abs_path.suffix == '.py':
-                            edited_py_files[rel_path_check] = new_content_normalized
-                    else:
-                        # Error printed by write_file
-                        failed_edits.append(i)
-                else:
-                     self._print("info", f"Edit {i+1} for {rel_path_check} resulted in no changes. Skipping write.")
-                     # Still need to lint even if no changes, in case the edit *fixed* a syntax error
-                     if abs_path.suffix == '.py':
-                         # Use the normalized content which might be different due to line endings only
-                         edited_py_files[rel_path_check] = new_content_normalized
-
-
-            except FileNotFoundError:
-                 self._print("error", f"File {rel_path_check} vanished before edit {i+1} could be applied.")
-                 failed_edits.append(i)
-            except Exception as e:
-                self._print("error", f"Error applying edit {i+1} to {fname}: {e}")
-                failed_edits.append(i)
-
-        if failed_edits:
-            self._print("error", f"Failed to apply edits: {', '.join(map(lambda x: str(x+1), failed_edits))}")
-
-        # --- Lint Python files after edits ---
-        # Lint all python files that were touched or newly created
-        for rel_path in applied_files:
-            if rel_path.endswith('.py'):
-                abs_path = self.file_manager.get_abs_path(rel_path) # Use FileManager
-                if abs_path:
-                    content_to_lint = edited_py_files.get(rel_path) # Get potentially modified content
-                    if content_to_lint is None: # If not in edited_py_files, read from disk
-                        content_to_lint = self.file_manager.read_file(abs_path) # Use FileManager
-
-                    if content_to_lint is not None:
-                        error_string = self._lint_python_compile(abs_path, content_to_lint)
-                        if error_string:
-                            self.lint_errors_found[rel_path] = error_string
-                    else:
-                         self._print("warning", f"Could not read {rel_path} for linting after edit.")
-
-
-        return applied_edit_to_at_least_one_file
-
-
     def _git_add_commit(self):
         """Stage changes to added files and commit them using GitManager."""
         if not self.git_manager.is_repo():
@@ -625,101 +364,6 @@ class App:
         if success:
             self.coder_commits.discard(last_hash) # Remove hash if undo succeeded
             self._write_chat_history("tool", f"Undid commit {last_hash}")
-        # else: # Failure messages printed by GitManager
-
-
-    def _handle_command(self, inp: str) -> bool:
-        """Handles slash commands, returns True if handled."""
-        parts = inp.strip().split(maxsplit=1)
-        command = parts[0]
-        args = parts[1].strip() if len(parts) > 1 else "" # Strip args here
-
-        if command == "/add":
-            filenames = re.findall(r"\"(.+?)\"|(\S+)", args) # Handle quoted filenames
-            filenames = [name for sublist in filenames for name in sublist if name]
-            if not filenames:
-                 self._print("error", "Usage: /add <file1> [\"file 2\"] ...")
-            else:
-                 for fname in filenames:
-                      self.file_manager.add_file(fname) # Use FileManager
-                      # Write history entry here, as FileManager doesn't do it
-                      # Need to resolve fname to the stored relative path for accurate history
-                      abs_path = self.file_manager.get_abs_path(fname)
-                      if abs_path:
-                          rel_path = self.file_manager._get_rel_path(abs_path)
-                          if rel_path in self.file_manager.get_files(): # Check if add succeeded
-                               self._write_chat_history("tool", f"Added {rel_path} to the chat.")
-        elif command == "/drop":
-            filenames = re.findall(r"\"(.+?)\"|(\S+)", args) # Handle quoted filenames
-            filenames = [name for sublist in filenames for name in sublist if name] # Flatten list of tuples
-            if not filenames:
-                 self._print("error", "Usage: /drop <file1> [\"file 2\"] ...")
-            else:
-                initial_fnames = set(self.file_manager.get_files()) # Copy before dropping
-                for fname in filenames:
-                      self.file_manager.drop_file(fname) # Use FileManager
-                # Write history for files actually dropped
-                dropped_fnames = initial_fnames - self.file_manager.get_files()
-                for fname in dropped_fnames: # fname here is the relative path
-                     self._write_chat_history("tool", f"Removed {fname} from the chat.")
-        elif command == "/clear":
-            self.chat_history = []
-            self._print("info", "Chat history cleared.")
-            self._write_chat_history("tool", "Chat history cleared.")
-        elif command == "/reset":
-            self.file_manager.fnames = set() # Reset FileManager's set
-            self.chat_history = []
-            self._print("info", "Chat history and file list cleared.")
-            self._write_chat_history("tool", "Chat history and file list cleared.")
-        elif command == "/commit":
-            self._git_add_commit()
-        elif command == "/undo":
-             self._git_undo()
-        elif command == "/ask":
-             self.mode = "ask"
-             self._print("info", "Switched to ASK mode. I will answer questions but not edit files.")
-             if args: # If user provided a prompt with /ask
-                 # Let run_one handle adding to history and processing
-                 return args # Return the prompt for run_one
-        elif command == "/code":
-             self.mode = "code"
-             self._print("info", "Switched to CODE mode. I will try to edit files.")
-             if args: # If user provided a prompt with /code
-                 # Let run_one handle adding to history and processing
-                 return args # Return the prompt for run_one
-        # Removed /format command as only 'diff' is supported now
-        elif command == "/files":
-            current_fnames = self.file_manager.get_files()
-            if not current_fnames:
-                 self._print("info", "No files are currently added to the chat.")
-            else:
-                 self._print("info", "Files in chat:")
-                 for fname in sorted(list(current_fnames)):
-                      print(f"- {fname}") # Use standard print for clean list
-        elif command == "/help":
-             self._print("info", """Available commands:
-  /add <file1> ["file 2"]...  Add file(s) to the chat context.
-  /drop <file1> ["file 2"]... Remove file(s) from the chat context.
-  /files                      List files currently in the chat.
-  /clear                      Clear the chat history.
-  /reset                      Clear chat history and drop all files.
-  /commit                     Commit the current changes made by this tool.
-  /undo                       Undo the last commit made by this tool.
-  /ask [question]             Switch to ASK mode (answer questions, no edits) or ask a question directly.
-  /code [instruction]         Switch to CODE mode (make edits) or give an instruction directly.
-  # /format command removed
-  /help                       Show this help message.
-  /exit or /quit              Exit the application.""")
-        elif command in ["/exit", "/quit"]:
-            return False # Signal to exit main loop
-        else:
-            self._print("error", f"Unknown command: {command}. Try /help.")
-
-        # Return True to indicate command was handled (or unknown but processed)
-        # This prevents the command itself from being treated as user input by run_one
-        return True
-
-    # --- Input Preprocessing ---
 
     def check_for_file_mentions(self, inp: str):
         """Placeholder: Checks for file mentions in user input."""
@@ -752,19 +396,27 @@ class App:
              self._print("assistant", response)
              self._add_to_history("assistant", response)
 
-             # Only try to apply edits if in code mode
+             # Only try to parse and apply edits if in code mode
              if self.mode == "code":
-                 edits = self._parse_edits(response)
+                 edits = self.edit_parser.parse(response)
                  if edits:
-                     if self._apply_edits(edits):
-                           # Optional: Auto-commit after successful edits
-                           # self._git_add_commit()
-                           pass
+                     applied_any, lint_errors = self.code_applier.apply_edits(edits)
+                     self.lint_errors_found = lint_errors # Update App state
+
+                     if applied_any:
+                         # Optional: Auto-commit after successful edits
+                         # self._git_add_commit()
+                         pass # Placeholder for now
                      else:
-                          self._print("info", "Some edits failed to apply.")
-                 else:
+                         # This case might be covered by CodeApplier's error messages,
+                         # but we can add a summary here if needed.
+                         # self._print("info", "No edits were successfully applied.")
+                         pass
+
+                 else: # No edits found by parser
                      # Check if the LLM just output code without the edit block format
-                     code_block_match = re.search(r"```(?:\w*\n)?(.*?)```", response, re.DOTALL)
+                     # Use the parser's regex for consistency
+                     code_block_match = self.edit_parser.code_block_pattern.search(response)
                      # Check if the *whole* response is just a code block (allow it),
                      # but warn if code appears *within* text without the block format.
                      is_just_code = response.strip().startswith("```") and response.strip().endswith("```")
@@ -845,23 +497,22 @@ class App:
                     continue
 
                 if inp.startswith("/"):
-                    # Keep track of mode before command potentially changes it
-                    mode_before_cmd = self.mode
-                    if not self._handle_command(inp):
+                    # Use the CommandHandler
+                    status, prompt = self.command_handler.handle(inp)
+
+                    if not status:
                         break # Exit command was received
-                    # If the command itself didn't process input (like /add, /drop, /help, /files, /format)
-                    # continue to the next loop iteration without sending anything to LLM.
-                    # Commands like /ask or /code with arguments will trigger processing via process_user_input(is_command_context=True).
-                    # Mode switching commands like bare /ask, /code don't need LLM processing either.
-                    # Exit/quit already handled. Commit/undo have their own logic. Reset/clear modify state.
-                    command_processed_input = inp.startswith(("/ask ", "/code ")) and len(inp.split()) > 1
-                    if not command_processed_input and self.mode == mode_before_cmd: # Check if mode actually changed
-                         continue
-                    # If a command like /ask or /code *without* args was used, just continue
-                    elif not command_processed_input and self.mode != mode_before_cmd:
-                         continue
+
+                    if prompt:
+                        # Command included a prompt (e.g., /ask "What is...?"), process it directly
+                        if not self.run_one(prompt, preproc=False): # Don't preprocess command args
+                            break # Exit signal from run_one
+                    else:
+                        # Command handled, continue to next input prompt
+                        continue
 
                 else: # Regular user message (not a command)
+                    # Preprocessing (URL/file mentions) happens within run_one if preproc=True
                     if not self.run_one(inp, preproc=True):
                          break # Exit signal from run_one
 
