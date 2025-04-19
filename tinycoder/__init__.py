@@ -9,13 +9,13 @@ from tinycoder.llms.base import LLMClient
 from tinycoder.llms.gemini import GeminiClient, DEFAULT_GEMINI_MODEL
 from tinycoder.llms.deepseek import DeepSeekClient, DEFAULT_DEEPSEEK_MODEL
 from tinycoder.utils import print_color
-from tinycoder.git import GitManager
-from tinycoder.repomap import RepoMap
-from tinycoder.files import FileManager
-from tinycoder.commands import CommandHandler
+from tinycoder.git_manager import GitManager
+from tinycoder.repo_map import RepoMap
+from tinycoder.file_manager import FileManager
+from tinycoder.command_handler import CommandHandler
 from tinycoder.edit_parser import EditParser
 from tinycoder.code_applier import CodeApplier
-from tinycoder.chat_history import ChatHistoryManager # Import new class
+from tinycoder.chat_history import ChatHistoryManager
 
 # --- Configuration ---
 APP_NAME = "tinycoder"

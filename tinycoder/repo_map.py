@@ -1,4 +1,5 @@
 import ast
+
 # Try importing unparse for argument formatting (Python 3.9+)
 try:
     from ast import unparse
@@ -8,9 +9,6 @@ except ImportError:
 from pathlib import Path
 from typing import Optional, Generator, List, Tuple, Set, Union
 
-
-
-# --- RepoMap Functionality ---
 class RepoMap:
     """Generates a simple repository map for Python files using AST."""
     def __init__(self, root: Optional[str], io_print_error):

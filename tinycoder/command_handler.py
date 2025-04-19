@@ -2,8 +2,8 @@ import re
 from typing import TYPE_CHECKING, Callable, Optional, Tuple, Set
 
 if TYPE_CHECKING:
-    from tinycoder.files import FileManager
-    from tinycoder.git import GitManager
+    from tinycoder.file_manager import FileManager
+    from tinycoder.git_manager import GitManager
     # from tinycoder.history import ChatHistoryManager # Assuming this might exist later
 
 # Define CommandHandlerReturn tuple for clarity

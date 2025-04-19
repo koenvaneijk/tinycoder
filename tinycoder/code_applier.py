@@ -5,8 +5,8 @@ from typing import List, Tuple, Dict, Optional, Callable, Set
 # Conditional import for type checking
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from tinycoder.files import FileManager
-    from tinycoder.git import GitManager
+    from tinycoder.file_manager import FileManager
+    from tinycoder.git_manager import GitManager
 
 class CodeApplier:
     """Applies parsed edits to files and performs linting."""
