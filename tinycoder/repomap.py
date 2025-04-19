@@ -125,20 +125,16 @@ class RepoMap:
                 for definition in definitions:
                     kind = definition[0]
                     name = definition[1]
-                    lineno = definition[2]
                     if kind == "Function":
                         args_str = definition[3]
-                        map_lines.append(f"  - Function {name}({args_str}) (line {lineno})")
+                        map_lines.append(f"  - def {name}({args_str})")
                     elif kind == "Class":
                         methods = definition[3]
-                        map_lines.append(f"  - Class {name} (line {lineno})")
+                        map_lines.append(f"  - class {name}")
                         for method_kind, method_name, method_lineno, method_args_str in methods:
-                             map_lines.append(f"    - Method {method_name}({method_args_str}) (line {method_lineno})")
+                             map_lines.append(f"    - def {method_name}({method_args_str})")
 
                 processed_files += 1
-            elif e: # If there was an error during parsing for this file
-                 self.io_print_error(f"Could not parse {rel_path_str} for repomap: {e}")
-
 
         if processed_files == 0 and not any(self.get_py_files()):
              # Only return empty if there were truly no python files found (excluding skipped ones)
@@ -151,7 +147,7 @@ class RepoMap:
 
         # Basic token limiting (very approximate)
         # TODO: Implement a more accurate token counter if needed
-        MAX_MAP_LINES = 100 # Limit the number of lines in the map
+        MAX_MAP_LINES = 1000 # Limit the number of lines in the map
         if len(map_lines) > MAX_MAP_LINES:
              map_lines = map_lines[:MAX_MAP_LINES]
              map_lines.append("\n... (repository map truncated)")

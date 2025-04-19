@@ -1,10 +1,8 @@
 import argparse
-import os
-import re
 import sys
 import traceback
 from pathlib import Path
-from typing import List, Set, Dict, Tuple, Optional
+from typing import List, Set, Dict, Optional
 import importlib.resources
 
 from tinycoder.llms.base import LLMClient
@@ -15,15 +13,16 @@ from tinycoder.git import GitManager
 from tinycoder.repomap import RepoMap
 from tinycoder.files import FileManager
 from tinycoder.commands import CommandHandler
-from tinycoder.edit_parser import EditParser # Import new class
-from tinycoder.code_applier import CodeApplier # Import new class
+from tinycoder.edit_parser import EditParser
+from tinycoder.code_applier import CodeApplier
+from tinycoder.chat_history import ChatHistoryManager # Import new class
 
 # --- Configuration ---
 APP_NAME = "tinycoder"
-HISTORY_FILE = ".tinycoder.chat.history.md"
+# HISTORY_FILE moved to ChatHistoryManager
 COMMIT_PREFIX = "tinycoder: "
 
-# --- Prompts ---s
+# --- Prompts ---
 # Load prompts using importlib.resources to work when installed as a package
 try:
     with importlib.resources.files(__package__).joinpath('prompts/system_prompt_base.md').open('r', encoding='utf-8') as f:
@@ -69,22 +68,23 @@ class App:
         # Store the actual model name being used (resolved by the client)
         self.model = self.client.model
 
-        # self.fnames: Set[str] = set() # Moved to FileManager
-        self.chat_history: List[Dict[str, str]] = []
-        self.git_manager = GitManager(self._print_error_internal) # Instantiate GitManager
-        self.git_root: Optional[str] = self.git_manager.get_root() # Get root from GitManager
-        self.file_manager = FileManager(self.git_root, self._print_error_internal, self._print_info_internal, input) # Instantiate FileManager
-        self.coder_commits: Set[str] = set() # tinycoder still tracks its own commits
-        self.mode = "code"
-        self.repo_map = RepoMap(self.git_root, self._print_error_internal) # Pass internal error printer
+        # Instantiate managers
+        self.git_manager = GitManager(self._print_error_internal)
+        self.git_root: Optional[str] = self.git_manager.get_root()
+        self.file_manager = FileManager(self.git_root, self._print_error_internal, self._print_info_internal, input)
+        self.history_manager = ChatHistoryManager(self._print_info_internal, self._print_error_internal) # Instantiate History Manager
+        self.repo_map = RepoMap(self.git_root, self._print_error_internal)
 
-        # Instantiate CommandHandler
+        # Other App state
+        self.coder_commits: Set[str] = set()
+        self.mode = "code"
+
+        # Instantiate CommandHandler (pass history manager methods)
         self.command_handler = CommandHandler(
             file_manager=self.file_manager,
             git_manager=self.git_manager,
-            # Pass functions/lambdas for dependencies
-            clear_history_func=lambda: self.chat_history.clear(), # Simple clear for now
-            write_history_func=self._write_chat_history,
+            clear_history_func=self.history_manager.clear,
+            write_history_func=self.history_manager.save_message_to_file_only, # Use specific method for file-only logging
             print_info=self._print_info_internal,
             print_error=self._print_error_internal,
             get_mode=lambda: self.mode,
@@ -122,15 +122,12 @@ class App:
 
         if not self.git_root:
             print_color("Warning: Not inside a git repository. Git integration (commit/undo) will be disabled.", "yellow")
-        # else: # Optional: Confirm git root found
-        #    self._print("info", f"Git repository root found at: {self.git_root}")
+        else:
+           self._print("info", f"Git repository root found at: {self.git_root}")
 
         # Add initial files using FileManager
         for fname in files:
             self.file_manager.add_file(fname) # Use FileManager
-
-        # Simplified history loading - might need improvement for robustness
-        self.load_chat_history()
 
     def _print(self, role: str, text: str):
         """Helper to print colored output."""
@@ -149,56 +146,6 @@ class App:
         """Internal helper for EditParser to print warnings."""
         self._print("warning", text) # Assuming 'warning' color exists or defaults
 
-    def _add_to_history(self, role: str, content: str):
-        """Adds a message to the chat history."""
-        self.chat_history.append({"role": role, "content": content})
-        self._write_chat_history(role, content)
-
-    def _write_chat_history(self, role: str, content: str):
-        """Appends a message to the history markdown file."""
-        try:
-            with open(HISTORY_FILE, "a", encoding="utf-8") as f:
-                prefix = "> " if role == "tool" else "#### " if role == "user" else ""
-                # Basic escaping of ``` for markdown history
-                content_md = content.replace("```", "\\```")
-                f.write(f"{prefix}{content_md.strip()}\n\n")
-        except Exception as e:
-            self._print("error", f"Could not write to history file {HISTORY_FILE}: {e}")
-
-    def load_chat_history(self):
-        """Loads chat history from the markdown file (Simplified)."""
-        if not os.path.exists(HISTORY_FILE):
-            return
-
-        try:
-            with open(HISTORY_FILE, "r", encoding="utf-8") as f:
-                content = f.read()
-            # Super simple parsing: Assume blocks separated by #### or > are messages
-            # This won't perfectly reconstruct Coder's complex history but gives a basic load
-            potential_messages = re.split(r'\n\n(?:#### |> )', content)
-            current_role = "assistant" # Assume first non-meta block is assistant
-            for block in potential_messages:
-                block = block.strip()
-                if not block or block.startswith("# coder chat started at"):
-                    continue
-                # Basic check if it looks like user input (starts without special prefix)
-                # This is fragile.
-                is_user = not block.startswith(("Assistant:", "Tool:", "Error:", "Info:", "Warning:", "> ", "#### "))
-                role = "user" if is_user else "assistant"
-
-                # Crude role alternation if the simple check fails
-                if role == current_role :
-                    role = "user" if current_role == "assistant" else "assistant"
-
-                # Unescape markdown code fences
-                block_content = block.replace("\\```", "```")
-                self.chat_history.append({"role": role, "content": block_content})
-                current_role = "user" if role == "assistant" else "assistant"
-
-            self._print("info", f"Loaded ~{len(self.chat_history)} messages from {HISTORY_FILE} (basic parsing)")
-        except Exception as e:
-            self._print("error", f"Could not load/parse history file {HISTORY_FILE}: {e}")
-
     def _build_system_prompt(self) -> str:
         """Builds the system prompt including file list and repo map."""
         current_fnames = sorted(list(self.file_manager.get_files()))
@@ -210,7 +157,6 @@ class App:
         # Ensure RepoMap uses the correct root from GitManager if available
         self.repo_map.root = Path(self.git_manager.get_root()) if self.git_manager.is_repo() else Path.cwd()
         repomap_block = self.repo_map.generate_map(self.file_manager.get_files()) # Use FileManager
-
         prompt_template = SYSTEM_PROMPT_ASK if self.mode == "ask" else SYSTEM_PROMPT_BASE
         base = prompt_template.format(fnames_block=fnames_block, repomap_block=repomap_block)
 
@@ -222,7 +168,8 @@ class App:
 
     def _send_to_llm(self) -> Optional[str]:
         """Sends the current chat history and file context to the LLM."""
-        if not self.chat_history or self.chat_history[-1]["role"] != "user":
+        current_history = self.history_manager.get_history()
+        if not current_history or current_history[-1]["role"] != "user":
             self._print("error", "Cannot send to LLM without a user message.")
             return None
 
@@ -240,7 +187,7 @@ class App:
 
         # Combine messages: System Prompt, File Context, Chat History
         # Place file context right before the last user message for relevance
-        messages_to_send = [system_prompt_msg] + self.chat_history[:-1] + file_context_message + [self.chat_history[-1]]
+        messages_to_send = [system_prompt_msg] + current_history[:-1] + file_context_message + [current_history[-1]]
 
         # Simple alternation check (might need refinement for edge cases)
         final_messages = []
@@ -363,7 +310,8 @@ class App:
 
         if success:
             self.coder_commits.discard(last_hash) # Remove hash if undo succeeded
-            self._write_chat_history("tool", f"Undid commit {last_hash}")
+            # Use history manager to log the undo action to the file only
+            self.history_manager.save_message_to_file_only("tool", f"Undid commit {last_hash}")
 
     def check_for_file_mentions(self, inp: str):
         """Placeholder: Checks for file mentions in user input."""
@@ -394,7 +342,7 @@ class App:
 
          if response:
              self._print("assistant", response)
-             self._add_to_history("assistant", response)
+             self.history_manager.add_message("assistant", response) # Use history manager
 
              # Only try to parse and apply edits if in code mode
              if self.mode == "code":
@@ -404,14 +352,9 @@ class App:
                      self.lint_errors_found = lint_errors # Update App state
 
                      if applied_any:
-                         # Optional: Auto-commit after successful edits
-                         # self._git_add_commit()
-                         pass # Placeholder for now
+                         self._git_add_commit()
                      else:
-                         # This case might be covered by CodeApplier's error messages,
-                         # but we can add a summary here if needed.
-                         # self._print("info", "No edits were successfully applied.")
-                         pass
+                         self._print("info", "No edits were successfully applied.")
 
                  else: # No edits found by parser
                      # Check if the LLM just output code without the edit block format
@@ -465,7 +408,7 @@ class App:
         num_reflections = 0
         max_reflections = 3
         while message:
-            self._add_to_history("user", message)
+            self.history_manager.add_message("user", message) # Use history manager
             self.process_user_input() # This now handles LLM call, edits, linting
 
             if not self.reflected_message:
@@ -492,6 +435,7 @@ class App:
                 prompt_str = f"({self.mode}) " # Edit format removed from prompt
                 prompt_str += ">>> "
 
+                print('\a', end='', flush=True) # Ring the terminal bell
                 inp = input(prompt_str)
                 if not inp.strip():
                     continue

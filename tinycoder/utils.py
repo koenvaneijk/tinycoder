@@ -1,7 +1,12 @@
 
-# --- Utility Functions ---
-def print_color(text: str, color: str):
-    """Prints text in a simple ANSI color."""
+def print_color(text: str, color: str) -> None:
+    """Prints text in a specified ANSI color.
+
+    Args:
+        text: The string to print.
+        color: The name of the color to use (e.g., "red", "green", "blue").
+               If the color name is not recognized, default terminal color is used.
+    """
     color_codes = {
         "red": "\033[91m",
         "green": "\033[92m",
