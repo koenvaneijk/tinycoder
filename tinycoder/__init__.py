@@ -36,7 +36,7 @@ from tinycoder.ui.spinner import Spinner
 import importlib.resources
 
 APP_NAME = "tinycoder"
-COMMIT_PREFIX = "tinycoder: "
+COMMIT_PREFIX = "🤖 tinycoder: "
 HISTORY_FILE = ".tinycoder_history" # Define history file name
 
 
