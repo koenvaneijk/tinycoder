@@ -44,13 +44,14 @@ HISTORY_FILE = ".tinycoder_history" # Define history file name
 
 class CommandCompleter:
     """A readline completer class specifically for TinyCoder commands."""
-    def __init__(self, file_manager: 'FileManager'):
+    def __init__(self, file_manager: 'FileManager', git_manager: 'GitManager'):
         self.file_manager = file_manager
         self.file_options: List[str] = []
         self.matches: List[str] = []
+        self.logger = logging.getLogger(__name__) # Get logger instance
+        self.git_manager = git_manager
         self._refresh_file_options() # Initial population
         # Add logger if not already present (assuming App passes it or it's globally accessible)
-        self.logger = logging.getLogger(__name__) # Get logger instance
 
 
     def _refresh_file_options(self):
@@ -70,8 +71,8 @@ class CommandCompleter:
             self.logger.debug(f"Refreshing file options for completion based on: {base_path}")
 
             # Use git_manager if available and in a repo
-            if self.file_manager.git_manager and self.file_manager.git_manager.is_repo():
-                tracked_files = self.file_manager.git_manager.get_tracked_files_relative()
+            if self.git_manager and self.git_manager.is_repo():
+                tracked_files = self.git_manager.get_tracked_files_relative()
                 repo_files.update(tracked_files)
                 self.logger.debug(f"Found {len(tracked_files)} tracked files via Git.")
             else:
@@ -446,7 +447,7 @@ class App:
 
         # --- Completion Setup ---
         try:
-            completer_instance = CommandCompleter(self.file_manager)
+            completer_instance = CommandCompleter(self.file_manager, self.git_manager)
             readline.set_completer(completer_instance.complete)
 
             # Set delimiters for completion. Crucially, DO NOT include path separators like '/' or '.'
