@@ -20,7 +20,8 @@ TinyCoder is a Python-based tool designed to help you interact with Large Langua
 
 *   **💻 Command-Line Interface:** Smooth terminal interaction with multiline input and potential path autocompletion.
 *   **🧠 Intelligent Context Building:**
-    *   **File Management:** Easily add/remove files (`/add`, `/drop`, `/files`) or mention them in prompts.
+    *   **File Management:** Easily add/remove files (`/add`, `/drop`, `/files`).
+    *   **Automatic File Identification:** Suggests relevant files to add to the context based on your request (`/ask` for files feature).
     *   **Repo Map:** Generates a high-level codebase map (`RepoMap`) for broader LLM understanding.
     *   **Smart Prompts:** Constructs detailed prompts using file content and repo structure (`PromptBuilder`).
 *   **🤖 Multiple LLM Support:** Works with **Google Gemini**, **DeepSeek**, and **Ollama**. Configure via `--model` flag and environment variables (`GEMINI_API_KEY`, `DEEPSEEK_API_KEY`).
@@ -28,16 +29,21 @@ TinyCoder is a Python-based tool designed to help you interact with Large Langua
     *   Parses LLM responses using a structured XML format (`EditParser`).
     *   Applies changes with user confirmation and diff previews (`CodeApplier`).
     *   Handles file creation and modification reliably.
-*   **🔄 Modes of Operation:** Switch between `code` mode (for edits) and `ask` mode (for questions) using `/code`, `/ask`, or `/mode`.
+    *   **Linting & Reflection:** Automatically lints applied code and prompts user to let the LLM fix errors.
+*   **🔄 Modes of Operation:** Switch between `code` mode (for edits) and `ask` mode (for questions) using `/code` and `/ask`.
 *   **🌿 Git Integration:**
     *   Initializes Git repo if needed (`GitManager`).
-    *   Commits applied changes (`/commit [files]`).
+    *   Commits changes applied by the last successful LLM edit (`/commit`).
     *   Rolls back the last TinyCoder commit (`/undo`).
-*   **✅ Linters & Validation:** Includes built-in linters for **Python**, **HTML**, and **CSS** to catch issues before applying edits.
-*   **📜 Rules Engine:** Define project-specific coding standards (e.g., `style_guide.md`) in `.tinycoder/rules/` and manage them with `/rules`, `/enable`, `/disable`.
-*   **🧪 Test Runner:** Execute project tests (like `pytest`) using the `/test` command (`test_runner.py`).
-*   **💾 Chat History:** Persists conversations to `.tinycoder.chat.history.md` (`ChatHistoryManager`) and allows resuming with `--continue`.
+*   **✅ Linters & Validation:** Includes built-in linters for **Python**, **HTML**, and **CSS** to catch issues *after* applying edits, with an option to auto-fix.
+*   **📜 Rules Engine:**
+    *   Define project-specific coding standards (e.g., `style_guide.md`) in `.tinycoder/rules/` (custom) or use built-in rules.
+    *   Manage active rules per-project using `/rules list|enable|disable`.
+    *   Configuration stored in OS-specific config directory (e.g., `~/.config/tinycoder` on Linux).
+*   **🧪 Test Runner:** Execute project tests (like `pytest`) using the `/tests` command (`test_runner.py`).
+*   **💾 Chat History:** Persists conversations to `.tinycoder_history` in the user's local share directory (e.g., `~/.local/share/tinycoder` on Linux) (`ChatHistoryManager`) and allows resuming with `--continue-chat`.
 *   **⚙️ Command Handling:** Rich set of commands for session control (`CommandHandler`).
+*   **🐚 Shell Execution:** Run shell commands directly using `!<command>`. Output can optionally be added to the chat context.
 
 ---
 
@@ -79,77 +85,49 @@ python3 -m pip install -e .
 **Start TinyCoder in your project's root directory:**
 
 ```bash
-# Use default LLM (see code/config for the default)
+# Use default LLM (Gemini)
 tinycoder
 
-# Specify an LLM model
-tinycoder --model ollama/llama3
+# Specify an LLM model (Ollama examples)
+tinycoder --model llama3
+tinycoder --model ollama/llama3 # Prefix is optional for Ollama
+# Specify Gemini (prefix required)
+tinycoder --model gemini-1.5-flash
+# Specify DeepSeek (prefix required)
+tinycoder --model deepseek-coder
+
+# Override Ollama host if not default
+export OLLAMA_HOST="http://my-ollama-server:11434"
+tinycoder --model mistral
 
 # Start with initial files and an instruction
 tinycoder src/main.py src/utils.py "Refactor the main loop in main.py"
 
 # Continue the last chat session
-tinycoder --continue
-```
+tinycoder --continue-chat
 
-**Example Interaction Flow:**
-
-```plaintext
-(code) >>> /add src/parser.py
-Added src/parser.py to chat context. (1 file total)
-
-(code) >>> Please add robust error handling to the parse_line function in src/parser.py using try-except blocks.
-Okay, I will add error handling to the `parse_line` function in `src/parser.py`.
-
-<file path="./src/parser.py">
-<edit_block>
-<old_code>
-def parse_line(line):
-    # Current implementation
-    parts = line.split(',')
-    return parts[0], int(parts[1])
-</old_code>
-<new_code>
-import logging
-
-def parse_line(line):
-    """Parses a line, handling potential errors."""
-    try:
-        parts = line.strip().split(',')
-        if len(parts) != 2:
-            logging.warning(f"Skipping malformed line: {line}")
-            return None, None
-        return parts[0], int(parts[1])
-    except ValueError:
-        logging.warning(f"Skipping line with invalid number: {line}")
-        return None, None
-    except Exception as e:
-        logging.error(f"Unexpected error parsing line '{line}': {e}")
-        return None, None
-</new_code>
-</edit_block>
-</file>
-
---- DIFF ---
-... (diff output shown here) ...
---- END DIFF ---
-Applying edits...
-File ./src/parser.py updated successfully.
-Successfully applied 1 edit.
-(code) >>> /commit
-Committed changes to 1 file with message: Applied AI edit to src/parser.py
+# Run non-interactively (applies changes and exits)
+tinycoder --code "Implement the function foo in service.py using utils.bar"
 ```
 
 **Quick Command Reference:**
 
-*   `/add <file>` / `/drop <file>`: Manage files in context.
-*   `/files`: List context files.
-*   `/ask` / `/code` / `/mode [ask|code]`: Change interaction mode.
-*   `/commit [files...]`: Commit applied changes.
-*   `/undo`: Revert last TinyCoder commit.
-*   `/test`: Run project tests.
-*   `/rules` / `/enable <rule>` / `/disable <rule>`: Manage coding rules.
-*   `/quit` or `Ctrl+C`: Exit.
+*   `/add <file> ["file 2"]...`: Add file(s) to the chat context.
+*   `/drop <file> ["file 2"]...`: Remove file(s) from the chat context.
+*   `/files`: List files currently in the chat.
+*   `/ask [question]`: Switch to ASK mode or ask a question directly.
+*   `/code [instruction]`: Switch to CODE mode or give an instruction directly.
+*   `/commit`: Commit the changes applied by the last successful LLM edit.
+*   `/undo`: Revert the last TinyCoder commit.
+*   `/tests`: Run project tests (e.g., `pytest` in `./tests`).
+*   `/rules list`: List available rules and their status for the project.
+*   `/rules enable <rule_name>`: Enable a specific rule.
+*   `/rules disable <rule_name>`: Disable a specific rule.
+*   `/clear`: Clear the chat history.
+*   `/reset`: Clear history and remove all files from context.
+*   `/help`: Show help message.
+*   `/quit` or `/exit` or `Ctrl+C`/`Ctrl+D`: Exit.
+*   `!<command>`: Execute a shell command. You'll be prompted to add the output to the chat.
 
 ---
 
