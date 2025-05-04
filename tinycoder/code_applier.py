@@ -10,6 +10,7 @@ if TYPE_CHECKING:
 # Linters
 from tinycoder.linters.python_linter import PythonLinter
 from tinycoder.linters.html_linter import HTMLLinter
+from tinycoder.linters.css_validator import CssValidator
 
 from tinycoder.ui.log_formatter import COLORS, RESET
 
@@ -40,6 +41,7 @@ class CodeApplier:
 
         self.python_linter = PythonLinter()
         self.html_linter = HTMLLinter()
+        self.css_validator = CssValidator()
 
     def apply_edits(
         self, edits: List[Tuple[str, str, str]]
@@ -316,6 +318,8 @@ class CodeApplier:
                 error_string = self.python_linter.lint(abs_path, content_to_lint)
             elif file_suffix in [".html", ".htm"]:
                 error_string = self.html_linter.lint(abs_path, content_to_lint)
+            elif file_suffix == ".css":
+                error_string = self.css_validator.lint(abs_path, content_to_lint)
 
             if error_string:
                 lint_errors_found[rel_path] = error_string
