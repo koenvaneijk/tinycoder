@@ -9,6 +9,14 @@ import sys
 import traceback
 from pathlib import Path
 from typing import List, Set, Dict, Optional, Any, Tuple
+import atexit # For readline history
+
+try:
+    import readline
+    READLINE_AVAILABLE = True
+except ImportError:
+    # readline is not available on all platforms (e.g., standard Windows cmd)
+    READLINE_AVAILABLE = False
 
 from tinycoder.chat_history import ChatHistoryManager
 from tinycoder.code_applier import CodeApplier
@@ -16,6 +24,8 @@ from tinycoder.command_handler import CommandHandler
 from tinycoder.edit_parser import EditParser
 from tinycoder.file_manager import FileManager
 from tinycoder.git_manager import GitManager
+# Ensure FileManager is imported if CommandCompleter uses it explicitly via type hint
+from tinycoder.file_manager import FileManager
 from tinycoder.llms import create_llm_client, LLMClient
 from tinycoder.prompt_builder import PromptBuilder
 from tinycoder.repo_map import RepoMap
@@ -27,6 +37,114 @@ import importlib.resources
 
 APP_NAME = "tinycoder"
 COMMIT_PREFIX = "tinycoder: "
+HISTORY_FILE = ".tinycoder_history" # Define history file name
+
+
+# --- Readline Configuration (only if available) ---
+
+class CommandCompleter:
+    """A readline completer class specifically for TinyCoder commands."""
+    def __init__(self, file_manager: 'FileManager'):
+        self.file_manager = file_manager
+        self.file_options: List[str] = []
+        self.matches: List[str] = []
+        self._refresh_file_options() # Initial population
+
+    def _refresh_file_options(self):
+        """Fetches the list of relative file paths from the FileManager."""
+        # Assuming FileManager has a method `get_all_repo_files`
+        # If not, this needs to be added to FileManager.
+        try:
+            # Use file_manager's root for relativity if possible
+            base_path = self.file_manager.root if self.file_manager.root else Path.cwd()
+            # Attempt to get files relative to the repo/project root
+            # TODO: Ensure get_all_repo_files() exists and returns relative paths.
+            # For now, simulate with get_files() which might only contain added files.
+            # Replace with a proper implementation later.
+            # self.file_options = sorted(self.file_manager.get_all_repo_files())
+            # Placeholder using get_files() - needs update
+            repo_files = set()
+            if self.file_manager.git_manager and self.file_manager.git_manager.is_repo():
+                 # Prefer git ls-files if available
+                 repo_files.update(self.file_manager.git_manager.get_tracked_files_relative())
+            else:
+                 # Fallback: Walk the directory if not a git repo or git failed
+                 root_to_walk = self.file_manager.root if self.file_manager.root else Path.cwd()
+                 for item in root_to_walk.rglob('*'):
+                     if item.is_file():
+                         try:
+                             # Make path relative to the root used for walking
+                             rel_path = item.relative_to(root_to_walk)
+                             repo_files.add(str(rel_path).replace('\\', '/')) # Normalize slashes
+                         except ValueError:
+                             pass # Should not happen if item is from rglob
+
+            # Also include files explicitly added to the context, even if not tracked/ignored
+            repo_files.update(self.file_manager.get_files())
+
+            self.file_options = sorted(list(repo_files))
+
+            # self.logger.debug(f"Refreshed file options for completion: {len(self.file_options)} files found.")
+        except AttributeError:
+            # self.logger.warning("FileManager does not have 'get_all_repo_files'. Completion might be limited.")
+            # Fallback to just the files currently in context
+            self.file_options = sorted(self.file_manager.get_files())
+        except Exception as e:
+            # self.logger.error(f"Error refreshing file options for completion: {e}")
+            self.file_options = []
+
+
+    def complete(self, text: str, state: int) -> Optional[str]:
+        """Readline completion handler."""
+        # Refresh file options on every completion attempt for dynamic updates
+        # This might be slow for very large repos; consider caching if needed.
+        if state == 0: # Refresh only on the first call for a new completion sequence
+             self._refresh_file_options()
+
+        line = readline.get_line_buffer()
+        # self.logger.debug(f"Readline complete called. Line: '{line}', Text: '{text}', State: {state}")
+
+        # --- Completion logic for /add ---
+        add_prefix = "/add "
+        if line.startswith(add_prefix):
+            # Path completion after /add
+            path_text = line[len(add_prefix):] # The part after "/add "
+
+            if state == 0:
+                # First call for this completion
+                self.matches = [
+                    f"{add_prefix}{p}" for p in self.file_options
+                    if p.startswith(path_text)
+                ]
+                # self.logger.debug(f"Found {len(self.matches)} path matches for '{path_text}'")
+
+            try:
+                # We return the full match (including /add ) so readline replaces correctly
+                match = self.matches[state]
+                # self.logger.debug(f"Returning match {state}: '{match}'")
+                return match
+            except IndexError:
+                # No more matches
+                # self.logger.debug(f"No more matches for state {state}")
+                return None
+
+        # --- Add completion for other commands if needed ---
+        # Example: /drop
+        # drop_prefix = "/drop "
+        # if line.startswith(drop_prefix):
+        #    ... (similar logic using self.file_manager.get_files())
+
+        # --- Default: No completion if not a recognized command prefix ---
+        # self.logger.debug("Line doesn't match known completion prefixes.")
+        self.matches = []
+        return None
+
+
+# --- End Readline Configuration ---
+
+
+class App:
+    def __init__(self, model: Optional[str], files: List[str], continue_chat: bool):
 
 
 class App:
@@ -41,7 +159,9 @@ class App:
         self._setup_rules()
         self._init_app_state()
         self._init_command_handler()
-        self._init_app_components()
+        # Configure readline *after* core managers (like file_manager) are ready
+        self._configure_readline()
+        self._init_app_components() # Determines input func based on readline availability
         self._log_final_status()
         self._add_initial_files(files)
 
@@ -289,6 +409,71 @@ class App:
         except Exception as e:
             self.logger.error(f"Failed to save rules config to {self.rules_config_path}: {e}")
 
+    def _configure_readline(self):
+        """Configures readline for history and command completion if available."""
+        if not READLINE_AVAILABLE:
+            self.logger.info("Readline module not available. Skipping history and completion setup.")
+            # Optionally print a warning for the user if desired, but logger covers it.
+            # print("Warning: readline not available. Tab completion and history disabled.", file=sys.stderr)
+            return
+
+        self.logger.debug("Readline available. Configuring...")
+
+        # --- Completion Setup ---
+        try:
+            completer_instance = CommandCompleter(self.file_manager)
+            readline.set_completer(completer_instance.complete)
+
+            # Set delimiters for completion
+            # Include space, path separators, command characters
+            readline.set_completer_delims(' \t\n`~!@#$%^&*()=+[{]}\\|;:\'",<>/?')
+
+            # Configure Tab key binding
+            if 'libedit' in readline.__doc__: # macOS/libedit
+                readline.parse_and_bind("bind -e") # Ensure emacs mode
+                readline.parse_and_bind("bind '\t' rl_complete")
+                self.logger.debug("Using libedit Tab binding.")
+            else: # GNU readline
+                readline.parse_and_bind("tab: complete")
+                self.logger.debug("Using standard readline Tab binding.")
+
+        except Exception as e:
+            self.logger.error(f"Failed to configure readline completion: {e}", exc_info=True)
+
+
+        # --- History Setup ---
+        # Use project identifier for potentially project-specific history
+        # Or use a generic one in the user's home directory
+        hist_dir = Path.home() / ".local" / "share" / APP_NAME
+        hist_dir.mkdir(parents=True, exist_ok=True) # Ensure directory exists
+        # Use a consistent history filename
+        self.history_file = hist_dir / HISTORY_FILE
+
+        try:
+            if self.history_file.exists():
+                readline.read_history_file(self.history_file)
+                self.logger.debug(f"Read history from {self.history_file}")
+            else:
+                self.logger.debug(f"History file {self.history_file} not found, starting fresh.")
+            # Set history length (optional)
+            readline.set_history_length(1000)
+            # Register saving history on exit
+            atexit.register(self._save_readline_history)
+            self.logger.debug("Readline history configured.")
+        except Exception as e:
+            self.logger.error(f"Failed to configure readline history: {e}", exc_info=True)
+
+    def _save_readline_history(self):
+        """Saves the readline history to the designated file."""
+        if not READLINE_AVAILABLE:
+            return
+        try:
+            readline.write_history_file(self.history_file)
+            self.logger.debug(f"Readline history saved to {self.history_file}")
+        except Exception as e:
+            self.logger.error(f"Failed to save readline history to {self.history_file}: {e}")
+
+
     def _discover_rules(self):
         """Discovers built-in and custom rules."""
         self.discovered_rules = {}
@@ -534,35 +719,90 @@ class App:
 
     # --- End Rule Management Methods ---
 
-
-    def _get_multiline_input_stdin(self):
-        """Gets multi-line input by reading stdin until EOF, with platform-specific instructions."""
+    def _get_multiline_input_readline(self):
+        """
+        Gets multi-line input using readline (if available), terminated by Ctrl+D.
+        Handles prompts and Ctrl+C cancellation.
+        """
+        lines = []
         # Determine the correct instruction based on the OS
         if platform.system() == "Windows":
-            message = "Enter text (Ctrl+Z then Enter to finish):"
+             # Readline might be available via pyreadline3, but Ctrl+Z is more standard there
+            finish_instruction = "(Ctrl+Z then Enter to finish on Windows)"
         else:
-            message = "Enter text (Ctrl+D to finish):"
+            finish_instruction = "(Ctrl+D to finish)" # Standard Unix-like
 
-        print(message)
-        print("USER:")
-        try:
-            user_input = sys.stdin.read()
-            # .read() often includes the final newline if the user pressed Enter
-            # before Ctrl+D/Ctrl+Z. You might want to strip trailing whitespace.
-            return user_input.rstrip()
-        except KeyboardInterrupt:
-            print("\nInput cancelled (Ctrl+C).")
-            return None  # Return None to signal cancellation
-        except Exception as e:
-            print(f"\nAn unexpected error occurred reading stdin: {e}")
-            return None  # Return None on error
+        print(f"Enter text {finish_instruction}:")
+
+        # Mode prefix for the prompt
+        mode_prefix = f"{STYLES['BOLD']}{FmtColors['GREEN']}({self.mode}){RESET} "
+        prompt = f"{mode_prefix}> "
+
+        while True:
+            try:
+                # Use input() to leverage readline's line editing, history, and completion
+                line = input(prompt)
+                lines.append(line)
+                # Change prompt for subsequent lines (optional, but common)
+                # Keep it simple for now
+                # prompt = f"{mode_prefix}.. "
+            except EOFError: # Handle Ctrl+D (or Ctrl+Z+Enter on Windows sometimes)
+                print() # Print a newline for cleaner exit after EOF
+                break
+            except KeyboardInterrupt: # Handle Ctrl+C
+                print("\nInput cancelled (Ctrl+C).")
+                return None # Indicate cancellation
+
+        return "\n".join(lines)
+
+    # This function remains, but its logic is simplified by _get_multiline_input_readline
+    def _get_multiline_input_stdin(self):
+         """Gets multi-line input by reading stdin until EOF (fallback)."""
+         # Determine the correct instruction based on the OS
+         if platform.system() == "Windows":
+             message = "Enter text (Ctrl+Z then Enter to finish):"
+         else:
+             message = "Enter text (Ctrl+D to finish):"
+
+         print(message)
+         # Mode prefix for the prompt - print once before stdin.read()
+         mode_prefix = f"{STYLES['BOLD']}{FmtColors['GREEN']}({self.mode}){RESET} "
+         print(f"{mode_prefix}> ", end="", flush=True)
+         try:
+             user_input = sys.stdin.read()
+             # .read() often includes the final newline if the user pressed Enter
+             # before Ctrl+D/Ctrl+Z. You might want to strip trailing whitespace.
+             return user_input.rstrip()
+         except KeyboardInterrupt:
+             print("\nInput cancelled (Ctrl+C).")
+             return None  # Return None to signal cancellation
+         except Exception as e:
+             print(f"\nAn unexpected error occurred reading stdin: {e}")
+             return None  # Return None on error
 
     def _get_input_function(self):
-        """Returns the appropriate input function based on the OS."""
-        if platform.system() == "Windows":
-            return input  # Fallback to standard input on Windows
+        """Returns the appropriate input function based on readline availability and OS."""
+        if READLINE_AVAILABLE and platform.system() != "Windows":
+            # Use readline-based input on non-Windows where it's generally more reliable
+            self.logger.debug("Using readline-based multi-line input function.")
+            return self._get_multiline_input_readline
+        elif platform.system() == "Windows":
+             # On Windows, default to single-line input() if readline isn't working well,
+             # or potentially use _get_multiline_input_stdin if that's preferred.
+             # Let's stick with standard `input` for simplicity unless readline is confirmed robust.
+             # Check if pyreadline3 might be installed and usable
+             if READLINE_AVAILABLE:
+                 self.logger.debug("Readline detected on Windows, using readline-based multi-line input.")
+                 # Try using the readline function on Windows too, relies on pyreadline3 behaving well
+                 return self._get_multiline_input_readline
+             else:
+                  self.logger.debug("Readline not available on Windows, falling back to single-line input().")
+                  # Fallback to standard input for single lines
+                  return input # Simple single-line input
         else:
-            return self._get_multiline_input_stdin  # Use multi-line on non-Windows
+            # Fallback for non-Windows non-readline scenarios (unlikely)
+            self.logger.debug("Readline not available, falling back to basic multi-line stdin read.")
+            return self._get_multiline_input_stdin
 
     def _send_to_llm(self) -> Optional[str]:
         """Sends the current chat history and file context to the LLM."""
@@ -1102,25 +1342,22 @@ class App:
 
         while True:
             try:
-                # Use FmtColors and STYLES for the mode prefix
-                mode_prefix = f"{STYLES['BOLD']}{FmtColors['GREEN']}({self.mode}){RESET} "
-                prompt_message = f"{mode_prefix}> "  # Used for single-line fallback
-
                 ring_bell()  # Ring the bell before input
 
-                if self.input_func == input:
-                    inp = self.input_func(prompt_message)
-                else:
-                    print(
-                        prompt_message, end="", flush=True
-                    )
-                    inp = (
-                        self.input_func()
-                    )
+                # Get input using the determined function
+                # The function itself now handles the prompt including the mode prefix
+                inp = self.input_func()
 
                 if inp is None:
-                    continue  # Skip processing if input was cancelled or failed
+                    # Input was cancelled (Ctrl+C in readline loop or stdin read)
+                    # or failed. Let's exit gracefully if it was cancellation.
+                    # Check if it was KeyboardInterrupt in the readline case
+                    # For simplicity, let's assume None means exit requested or failed input.
+                    print("Input cancelled or failed. Exiting.")
+                    break # Exit main loop
 
+
+                # Strip leading/trailing whitespace from the whole multi-line input
                 processed_inp = inp.strip()
                 if not processed_inp:
                     continue  # Skip empty input
@@ -1181,16 +1418,8 @@ def main():
     )
     args = parser.parse_args()
 
-    try:
-        import readline
-
-        if "libedit" in readline.__doc__:
-            readline.parse_and_bind("bind ^I rl_complete")
-        else:
-            readline.parse_and_bind("tab: complete")
-
-    except ImportError:
-        pass  # Readline not available, proceed without it
+    # Readline configuration is now handled within App.__init__
+    # No need for readline setup here anymore.
 
     coder = App(model=args.model, files=args.files, continue_chat=args.continue_chat)
 
