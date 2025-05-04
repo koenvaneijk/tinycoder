@@ -14,7 +14,7 @@
 
 TinyCoder is a Python-based tool designed to help you interact with Large Language Models (LLMs) for coding tasks directly within your terminal. It analyzes your codebase, builds context for the LLM, applies suggested code changes safely, and integrates seamlessly with your Git workflow. Minimal dependencies, maximum productivity!
 
-![TinyCoder Screenshot](https://raw.githubusercontent.com/koenvaneijk/tinycoder/main/screenshots/image.png)
+![TinyCoder Screenshot](https://github.com/koenvaneijk/tinycoder/blob/main/screenshots/image.png?raw=true)
 
 ## 🚀 Key Features
 
