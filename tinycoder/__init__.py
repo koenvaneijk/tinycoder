@@ -64,37 +64,53 @@ class CommandCompleter:
             # TODO: Ensure get_all_repo_files() exists and returns relative paths.
             # For now, simulate with get_files() which might only contain added files.
             # Replace with a proper implementation later.
-            # self.file_options = sorted(self.file_manager.get_all_repo_files())
             # Placeholder using get_files() - needs update
-            repo_files = set()
-            if self.file_manager.git_manager and self.file_manager.git_manager.is_repo():
-                 # Prefer git ls-files if available
-                 repo_files.update(self.file_manager.git_manager.get_tracked_files_relative())
-            else:
-                 # Fallback: Walk the directory if not a git repo or git failed
-                 root_to_walk = self.file_manager.root if self.file_manager.root else Path.cwd()
-                 for item in root_to_walk.rglob('*'):
-                     if item.is_file():
-                         try:
-                             # Make path relative to the root used for walking
-                             rel_path = item.relative_to(root_to_walk)
-                             repo_files.add(str(rel_path).replace('\\', '/')) # Normalize slashes
-                         except ValueError:
-                             pass # Should not happen if item is from rglob
+            repo_files: Set[str] = set()
+            base_path = self.file_manager.root if self.file_manager.root else Path.cwd()
+            self.logger.debug(f"Refreshing file options for completion based on: {base_path}")
 
-            # Also include files explicitly added to the context, even if not tracked/ignored
-            repo_files.update(self.file_manager.get_files())
+            # Use git_manager if available and in a repo
+            if self.file_manager.git_manager and self.file_manager.git_manager.is_repo():
+                tracked_files = self.file_manager.git_manager.get_tracked_files_relative()
+                repo_files.update(tracked_files)
+                self.logger.debug(f"Found {len(tracked_files)} tracked files via Git.")
+            else:
+                # Fallback: Walk the directory if not a git repo or git failed
+                self.logger.debug("Not a Git repo or Git unavailable, walking the directory...")
+                # Exclude common large/binary directories for performance
+                excluded_dirs = {'.git', '__pycache__', 'node_modules', '.venv', 'venv'}
+                for item in base_path.rglob('*'):
+                    # Check if the item is within any excluded directory
+                    if any(excluded in item.parts for excluded in excluded_dirs):
+                        continue
+                    if item.is_file():
+                        try:
+                            # Make path relative to the root used for walking
+                            rel_path = item.relative_to(base_path)
+                            # Normalize slashes for consistency
+                            repo_files.add(str(rel_path).replace('\\', '/'))
+                        except ValueError:
+                            # Should not happen if item is from rglob relative to base_path
+                            self.logger.warning(f"Could not make path relative: {item}")
+                        except Exception as walk_err:
+                            # Catch other potential errors during walk
+                            self.logger.warning(f"Error processing path during walk: {item} - {walk_err}")
+                self.logger.debug(f"Found {len(repo_files)} files via directory walk.")
+
+            # Always include files explicitly added to the chat context,
+            # even if they are untracked or outside the main discovery paths.
+            context_files = self.file_manager.get_files()
+            repo_files.update(context_files)
+            if context_files:
+                 self.logger.debug(f"Added {len(context_files)} files from current chat context.")
 
             self.file_options = sorted(list(repo_files))
+            self.logger.debug(f"Total unique file options for completion: {len(self.file_options)}")
 
-            # self.logger.debug(f"Refreshed file options for completion: {len(self.file_options)} files found.")
-        except AttributeError:
-            # self.logger.warning("FileManager does not have 'get_all_repo_files'. Completion might be limited.")
-            # Fallback to just the files currently in context
-            self.file_options = sorted(self.file_manager.get_files())
         except Exception as e:
-            # self.logger.error(f"Error refreshing file options for completion: {e}")
-            self.file_options = []
+            self.logger.error(f"Error refreshing file options for completion: {e}", exc_info=True)
+            # Fallback to just the files currently in context in case of error
+            self.file_options = sorted(list(self.file_manager.get_files()))
 
 
     def complete(self, text: str, state: int) -> Optional[str]:
