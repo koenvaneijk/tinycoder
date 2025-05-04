@@ -49,6 +49,9 @@ class CommandCompleter:
         self.file_options: List[str] = []
         self.matches: List[str] = []
         self._refresh_file_options() # Initial population
+        # Add logger if not already present (assuming App passes it or it's globally accessible)
+        self.logger = logging.getLogger(__name__) # Get logger instance
+
 
     def _refresh_file_options(self):
         """Fetches the list of relative file paths from the FileManager."""
@@ -102,7 +105,7 @@ class CommandCompleter:
              self._refresh_file_options()
 
         line = readline.get_line_buffer()
-        # self.logger.debug(f"Readline complete called. Line: '{line}', Text: '{text}', State: {state}")
+        self.logger.debug(f"Readline complete called. Line: '{line}', Text: '{text}', State: {state}")
 
         # --- Completion logic for /add ---
         add_prefix = "/add "
@@ -112,20 +115,29 @@ class CommandCompleter:
 
             if state == 0:
                 # First call for this completion
-                self.matches = [
-                    f"{add_prefix}{p}" for p in self.file_options
+                # 'text' passed by readline is the word fragment it identified based on delimiters
+                # For '/add src/m', text should ideally be 'src/m'
+                # We need to find options that *start with* the path_text derived from the line
+                self.matches = sorted([
+                    p for p in self.file_options
                     if p.startswith(path_text)
-                ]
-                # self.logger.debug(f"Found {len(self.matches)} path matches for '{path_text}'")
+                ])
+                self.logger.debug(f"Path text: '{path_text}', Options: {len(self.file_options)}, Matches found: {len(self.matches)}")
+                self.logger.debug(f"Matches: {self.matches[:5]}...") # Log first few matches
 
             try:
-                # We return the full match (including /add ) so readline replaces correctly
+                # Readline expects the *completion* relative to 'text',
+                # or the full word if 'text' was empty.
+                # Since path_text is the part *after* '/add ', our matches ARE the full paths.
+                # Readline will handle replacing 'text' with the returned match.
                 match = self.matches[state]
-                # self.logger.debug(f"Returning match {state}: '{match}'")
+                self.logger.debug(f"Returning match {state}: '{match}' (relative to path_text: '{path_text}')")
+                # Return the full path match. Readline should handle the replacement correctly
+                # if delimiters are set properly.
                 return match
             except IndexError:
                 # No more matches
-                # self.logger.debug(f"No more matches for state {state}")
+                self.logger.debug(f"No more matches for state {state}")
                 return None
 
         # --- Add completion for other commands if needed ---
@@ -142,9 +154,6 @@ class CommandCompleter:
 
 # --- End Readline Configuration ---
 
-
-class App:
-    def __init__(self, model: Optional[str], files: List[str], continue_chat: bool):
 
 
 class App:
@@ -424,9 +433,10 @@ class App:
             completer_instance = CommandCompleter(self.file_manager)
             readline.set_completer(completer_instance.complete)
 
-            # Set delimiters for completion
-            # Include space, path separators, command characters
-            readline.set_completer_delims(' \t\n`~!@#$%^&*()=+[{]}\\|;:\'",<>/?')
+            # Set delimiters for completion. Crucially, DO NOT include path separators like '/' or '.'
+            # if you want to complete segments containing them. Let's stick to whitespace and typical shell separators.
+            # Space is the most important delimiter here to separate `/add` from the path.
+            readline.set_completer_delims(' \t\n`~!@#$%^&*()=+[{]}|;:\'",<>?') # Removed \ . /
 
             # Configure Tab key binding
             if 'libedit' in readline.__doc__: # macOS/libedit
@@ -450,16 +460,18 @@ class App:
         self.history_file = hist_dir / HISTORY_FILE
 
         try:
+            # Set history length (optional)
+            readline.set_history_length(1000)
+            # Read history file *after* setting bindings and completer, *before* registering save
             if self.history_file.exists():
                 readline.read_history_file(self.history_file)
                 self.logger.debug(f"Read history from {self.history_file}")
             else:
                 self.logger.debug(f"History file {self.history_file} not found, starting fresh.")
-            # Set history length (optional)
-            readline.set_history_length(1000)
+
             # Register saving history on exit
             atexit.register(self._save_readline_history)
-            self.logger.debug("Readline history configured.")
+            self.logger.debug("Readline history configured and loaded.")
         except Exception as e:
             self.logger.error(f"Failed to configure readline history: {e}", exc_info=True)
 
