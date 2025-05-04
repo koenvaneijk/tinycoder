@@ -196,6 +196,23 @@ class GitManager:
     def get_last_commit_hash(self) -> Optional[str]:
         return self.git_root
 
+    def get_tracked_files_relative(self) -> List[str]:
+        """Gets a list of all files currently tracked by git, relative to the repo root."""
+        if not self.is_repo():
+            self.logger.debug("Cannot get tracked files: Not in a git repository or git unavailable.")
+            return []
+
+        # 'git ls-files' lists tracked files relative to the repo root
+        ret, stdout, stderr = self._run_git_command(["ls-files"])
+
+        if ret == 0:
+            files = [line.strip() for line in stdout.splitlines() if line.strip()]
+            self.logger.debug(f"Found {len(files)} tracked files via 'git ls-files'.")
+            return files
+        else:
+            self.io_print_error(f"Failed to list tracked files using 'git ls-files': {stderr.strip()}")
+            return []
+
     def get_last_commit_hash(self) -> Optional[str]:
         """Get the short hash of the last commit."""
         if not self.is_repo():
