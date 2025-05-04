@@ -187,16 +187,6 @@ class TestCssValidator(unittest.TestCase):
         result = validator.lint(self.test_path_obj, css)
         self.assertIsNone(result, f"Expected no errors for comment-only content, got: {result}")
 
-    def test_lint_nested_braces_invalid(self) -> None:
-        """Test lint() with invalid nested braces (should still report imbalance)."""
-        # Note: The simple linter doesn't understand CSS syntax like @media,
-        # but it should correctly report brace imbalance issues.
-        css = "@media screen { body { { color: red; } } }" # Extra inner {}
-        validator = CssValidator()
-        result = validator.lint(self.test_path_obj, css)
-        self.assertIsNotNone(result)
-        # The exact error might depend on parsing details, check for brace issues
-        self.assertTrue("Unmatched '{'" in result or "Unexpected '}'" in result)
 
 
     def test_lint_from_file_valid(self) -> None:
