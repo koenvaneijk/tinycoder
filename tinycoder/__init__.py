@@ -1426,6 +1426,10 @@ def main():
             |__/                      
           """)
 
+    # Get default provider and model from environment variables
+    default_provider = os.environ.get("TINYCODER_PROVIDER", None)
+    default_model = os.environ.get("TINYCODER_MODEL", None)
+    
     parser = argparse.ArgumentParser(
         description=f"{APP_NAME} - A simplified AI coding assistant."
     )
@@ -1435,40 +1439,126 @@ def main():
         nargs="*",
         help="Files to add to the chat context on startup.",
     )
+    
+    # New provider selection argument
+    parser.add_argument(
+        "--provider",
+        choices=["anthropic", "gemini", "ollama", "together", "deepseek"],
+        default=default_provider,
+        help="The LLM provider to use (default: auto-detected or from TINYCODER_PROVIDER env var)",
+    )
+    
+    # Updated model argument - now just specifies the model within the provider
     parser.add_argument(
         "--model",
         metavar="MODEL_NAME",
-        default=None,
+        default=default_model,
         help=(
-            "LLM model to use. Determines the API provider. "
-            "Prefix with 'gemini-' or 'deepseek-' for those providers. "
-            "Any other name (or no prefix) assumes a locally running Ollama model (e.g., 'llama3', 'mistral:7b'). "
-            "If completely unspecified, defaults to Gemini. "
-            "Set OLLAMA_HOST environment variable if your Ollama server isn't at http://localhost:11434."
+            "Specific model name within the selected provider. "
+            "Provider-specific model without needing prefixes. "
+            "Default is provider-specific or from TINYCODER_MODEL env var."
         ),
     )
+    
+    # Legacy model argument that includes provider prefix (for backward compatibility)
+    parser.add_argument(
+        "--legacy-model",
+        metavar="PREFIXED_MODEL_NAME",
+        default=None,
+        help=(
+            "(Legacy) LLM model including provider prefix. "
+            "Example prefixes: 'gemini-', 'claude-', 'together-'. "
+            "Models without recognized prefixes are treated as Ollama models."
+        ),
+    )
+    
+    parser.add_argument(
+        "--list-models",
+        action="store_true",
+        help="List available models for each provider and exit",
+    )
+    
+    parser.add_argument(
+        "--interactive-model",
+        action="store_true",
+        help="Start an interactive model selection prompt",
+    )
+    
     parser.add_argument(
         "--code",
         metavar="INSTRUCTION",
         default=None,
         help="Execute a code command directly without interactive mode. Applies edits and commits changes.",
     )
+    
     parser.add_argument(
         "--continue-chat",
         action="store_true",
         help="Continue from previous chat history instead of starting fresh.",
     )
+    
     args = parser.parse_args()
 
-    # Readline configuration is now handled within App.__init__
-    # No need for readline setup here anymore.
+    # Handle --list-models
+    if args.list_models:
+        list_available_models()
+        return
 
-    coder = App(model=args.model, files=args.files, continue_chat=args.continue_chat)
+    # Handle model selection
+    model_str = None
+    
+    # Check for interactive selection first
+    if args.interactive_model:
+        model_str = select_model_interactive()
+    
+    # If legacy model is specified, it takes precedence
+    elif args.legacy_model:
+        model_str = args.legacy_model
+    
+    # Otherwise use provider + model combination
+    elif args.provider:
+        # Convert provider + model to the prefix format the backend expects
+        if args.provider == "anthropic":
+            model_name = args.model or "claude-3-7-sonnet-20250219"
+            if not model_name.startswith("claude-"):
+                model_str = f"claude-{model_name}"
+            else:
+                model_str = model_name
+        elif args.provider == "gemini":
+            model_name = args.model or "gemini-pro"
+            if not model_name.startswith("gemini-"):
+                model_str = f"gemini-{model_name}"
+            else:
+                model_str = model_name
+        elif args.provider == "deepseek":
+            model_name = args.model or "deepseek-coder"
+            if not model_name.startswith("deepseek-"):
+                model_str = f"deepseek-{model_name}"
+            else:
+                model_str = model_name
+        elif args.provider == "together":
+            model_name = args.model or "Qwen/Qwen3-235B-A22B-fp8-tput"
+            model_str = f"together-{model_name}"
+        elif args.provider == "ollama":
+            model_str = args.model or "qwen3:14b"
+    
+    # If no provider specified but model is, assume Ollama
+    elif args.model:
+        model_str = args.model
+    
+    # Load user preferences if nothing specified on command line
+    if model_str is None:
+        model_str = load_user_preference_model()
+
+    # Initialize the app
+    coder = App(model=model_str, files=args.files, continue_chat=args.continue_chat)
+
+    # Save the model preference for next time
+    save_user_preference(coder.client.__class__.__name__, coder.model)
 
     if args.code:
         coder.mode = "code"
         coder.run_one(args.code, preproc=False, non_interactive=True)
-
     else:
         coder.run()
 

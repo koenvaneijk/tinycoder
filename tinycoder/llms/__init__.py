@@ -69,8 +69,17 @@ def create_llm_client(model: Optional[str]) -> LLMClient:
             resolved_model_name = client.model
         except Exception as e:
             raise ValueError(f"Error initializing Anthropic client for model '{model}': {e}") from e
+    elif model and model.startswith("together-"):
+        logger.info(f"Attempting to initialize Together.ai client with model: {model}")
+        try:
+            # Strip the "together-" prefix for the actual model name
+            actual_model = model[len("together-"):]
+            client = TogetherAIClient(model=actual_model)
+            resolved_model_name = client.model
+        except Exception as e:
+            raise ValueError(f"Error initializing Together.ai client for model '{model}': {e}") from e
     else:
-        # Assume Ollama for unknown/missing prefixes if not Gemini, DeepSeek, or Anthropic
+        # Assume Ollama for unknown/missing prefixes if not recognized
         logger.info(f"Unknown or missing prefix for model '{model}'. Assuming local Ollama model.")
         resolved_model_name = model # Use the provided name for Ollama, or None if None was passed
         try:
