@@ -1,7 +1,10 @@
+import os # Needed for Ollama error message
+
 from .base import LLMClient
 from .gemini import GeminiClient, DEFAULT_GEMINI_MODEL
 from .deepseek import DeepSeekClient
-from .ollama import OllamaClient, DEFAULT_OLLAMA_MODEL # Import OllamaClient
+from .ollama import OllamaClient, DEFAULT_OLLAMA_MODEL, DEFAULT_OLLAMA_HOST # Import OllamaClient and its defaults
+from .anthropic import AnthropicClient # Import AnthropicClient
 
 from typing import Optional
 
@@ -12,6 +15,7 @@ __all__ = [
     "GeminiClient",
     "DeepSeekClient",
     "OllamaClient", # Add OllamaClient to __all__
+    "AnthropicClient", # Add AnthropicClient to __all__
 ]
 
 logger = logging.getLogger(__name__)
@@ -56,8 +60,15 @@ def create_llm_client(model: Optional[str]) -> LLMClient:
         except Exception as e:
             # Error initializing even the default model is critical
              raise ValueError(f"Error initializing default Gemini client ({resolved_model_name}): {e}") from e
+    elif model and model.startswith("claude-"):
+        logger.info(f"Attempting to initialize Anthropic client with model: {model}")
+        try:
+            client = AnthropicClient(model=model)
+            resolved_model_name = client.model
+        except Exception as e:
+            raise ValueError(f"Error initializing Anthropic client for model '{model}': {e}") from e
     else:
-        # Assume Ollama for unknown/missing prefixes if not Gemini or DeepSeek
+        # Assume Ollama for unknown/missing prefixes if not Gemini, DeepSeek, or Anthropic
         logger.info(f"Unknown or missing prefix for model '{model}'. Assuming local Ollama model.")
         resolved_model_name = model # Use the provided name for Ollama, or None if None was passed
         try:
