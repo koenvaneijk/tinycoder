@@ -5,6 +5,7 @@ from .gemini import GeminiClient, DEFAULT_GEMINI_MODEL
 from .deepseek import DeepSeekClient
 from .ollama import OllamaClient, DEFAULT_OLLAMA_MODEL, DEFAULT_OLLAMA_HOST # Import OllamaClient and its defaults
 from .anthropic import AnthropicClient # Import AnthropicClient
+from .together_ai import TogetherAIClient, DEFAULT_TOGETHER_MODEL # Import TogetherAIClient
 
 from typing import Optional
 
@@ -16,6 +17,7 @@ __all__ = [
     "DeepSeekClient",
     "OllamaClient", # Add OllamaClient to __all__
     "AnthropicClient", # Add AnthropicClient to __all__
+    "TogetherAIClient", # Add TogetherAIClient to __all__
 ]
 
 logger = logging.getLogger(__name__)
