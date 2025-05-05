@@ -1369,37 +1369,44 @@ class App:
             f"Welcome to {FmtColors['GREEN']}{STYLES['BOLD']}{APP_NAME}{RESET}! Model: {FmtColors['GREEN']}{STYLES['BOLD']}{self.model}{RESET}. Type /help for commands, !<cmd> to run shell commands.",
         )
 
+        ctrl_c_pressed_once = False
         while True:
             try:
+                # Reset the Ctrl+C flag at the beginning of each input cycle
+                ctrl_c_pressed_once = False
                 ring_bell()  # Ring the bell before input
 
                 # Get input using the determined function
                 # The function itself now handles the prompt including the mode prefix
-                inp = self.input_func()
+                inp = self.input_func() # This function handles its own KeyboardInterrupt by returning None
 
                 if inp is None:
                     # Input was cancelled (Ctrl+C in readline loop or stdin read)
-                    # or failed. Let's exit gracefully if it was cancellation.
-                    # Check if it was KeyboardInterrupt in the readline case
-                    # For simplicity, let's assume None means exit requested or failed input.
-                    print("Input cancelled or failed. Exiting.")
-                    break # Exit main loop
-
+                    # or failed. Don't exit the app, just prompt again.
+                    print("\nInput cancelled.", file=sys.stderr) # Use stderr for messages
+                    continue # Go to next loop iteration
 
                 # Strip leading/trailing whitespace from the whole multi-line input
                 processed_inp = inp.strip()
                 if not processed_inp:
                     continue  # Skip empty input
 
+                # Process the valid input
                 status = self.run_one(processed_inp, preproc=True)
                 if not status:
                     break  # Exit signal from run_one (e.g., /exit command)
 
-            except KeyboardInterrupt:  # Handle Ctrl+C
-                print()
-                break  # Exit on Ctrl+C
-            except EOFError:  # Handle Ctrl+D (now treated as exit)
-                print()
+            except KeyboardInterrupt:  # Handle Ctrl+C pressed *outside* the input function
+                if ctrl_c_pressed_once:
+                    print("\nExiting.", file=sys.stderr)
+                    break # Exit on second consecutive Ctrl+C
+                else:
+                    ctrl_c_pressed_once = True
+                    print("\nPress Ctrl+C again to exit.", file=sys.stderr)
+                    # Continue the loop to prompt for input again
+                    continue
+            except EOFError:  # Handle Ctrl+D (still treated as exit)
+                print("\nExiting (EOF).", file=sys.stderr)
                 break  # Exit on Ctrl+D
 
         self.logger.info("Goodbye! 👋")
