@@ -7,10 +7,11 @@ import tinycoder.requests as requests # Use the local requests shim
 from tinycoder.llms.base import LLMClient
 
 # Recommended default model (Sonnet 3.5 is a strong, cost-effective choice)
-DEFAULT_ANTHROPIC_MODEL = "claude-3-5-sonnet-20240620"
+DEFAULT_ANTHROPIC_MODEL = "claude-3-7-sonnet-20250219"
 ANTHROPIC_API_ENDPOINT = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_API_VERSION = "2023-06-01"
 ANTHROPIC_API_KEY_ENV_VAR = "ANTHROPIC_API_KEY"
+
 # Anthropic requires max_tokens. 4096 is a reasonable default upper limit.
 DEFAULT_MAX_TOKENS = 4096
 
@@ -25,7 +26,7 @@ class AnthropicClient(LLMClient):
         Initializes the Anthropic client.
 
         Args:
-            model: The specific Anthropic model to use (e.g., "claude-3-opus-20240229").
+            model: The specific Anthropic model to use (e.g., "claude-3-7-sonnet-20250219").
                    Defaults to DEFAULT_ANTHROPIC_MODEL if not provided.
             api_key: The Anthropic API key. If not provided, attempts to read from
                      the ANTHROPIC_API_KEY environment variable.

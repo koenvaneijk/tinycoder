@@ -1646,7 +1646,7 @@ def main():
             else:
                 model_str = model_name
         elif args.provider == "gemini":
-            model_name = args.model or "gemini-pro"
+            model_name = args.model or "gemini-2.5-pro-preview-03-25"
             if not model_name.startswith("gemini-"):
                 model_str = f"gemini-{model_name}"
             else:
@@ -1669,7 +1669,7 @@ def main():
     
     # Load user preferences if nothing specified on command line
     if model_str is None:
-        model_str = load_user_preference_model() or 'claude-3-7-sonnet-20250219'
+        model_str = load_user_preference_model()
 
     # Initialize the app
     coder = App(model=model_str, files=args.files, continue_chat=args.continue_chat)
