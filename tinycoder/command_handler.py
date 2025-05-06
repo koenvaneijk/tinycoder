@@ -137,17 +137,17 @@ class CommandHandler:
             return True, None
 
         elif command == "/ask":
+            if args_str:
+                self.logger.warning("/ask command no longer accepts arguments. It only switches mode. Use /code or /ask then enter your query.")
             self.set_mode("ask")
             self.logger.info("Switched to ASK mode. I will answer questions but not edit files.")
-            if args_str:
-                return True, args_str
             return True, None
 
         elif command == "/code":
+            if args_str:
+                self.logger.warning("/code command no longer accepts arguments. It only switches mode. Use /code or /ask then enter your query.")
             self.set_mode("code")
             self.logger.info("Switched to CODE mode. I will try to edit files.")
-            if args_str:
-                return True, args_str
             return True, None
         
         elif command == "/suggest_files":
@@ -227,8 +227,8 @@ class CommandHandler:
   /reset                      Clear chat history and drop all files.
   /commit                     Commit the current changes made by {self.app_name}.
   /undo                       Undo the last commit made by {self.app_name}.
-  /ask [question]             Switch to ASK mode (answer questions, no edits) or ask a question directly.
-  /code [instruction]         Switch to CODE mode (make edits) or give an instruction directly.
+  /ask                        Switch to ASK mode (answer questions, no edits).
+  /code                       Switch to CODE mode (make edits).
   /tests                      Run unit tests found in the ./tests directory.
   /rules list                 List available built-in and custom rules and their status for this project.
   /rules enable <rule_name>   Enable a rule for this project.
