@@ -426,21 +426,21 @@ class App:
                 readline.set_completer(completer_instance.complete)
 
                 # Set delimiters for completion. Crucially, DO NOT include path separators like '/' or '.'
-            # if you want to complete segments containing them. Let's stick to whitespace and typical shell separators.
-            # Space is the most important delimiter here to separate `/add` from the path.
-            readline.set_completer_delims(' \t\n`~!@#$%^&*()=+[{]}|;:\'",<>?') # Removed \ . /
+                # if you want to complete segments containing them. Let's stick to whitespace and typical shell separators.
+                # Space is the most important delimiter here to separate `/add` from the path.
+                readline.set_completer_delims(' \t\n`~!@#$%^&*()=+[{]}|;:\'",<>?') # Removed \ . /
 
-            # Configure Tab key binding
-            if 'libedit' in readline.__doc__: # macOS/libedit
-                readline.parse_and_bind("bind -e") # Ensure emacs mode
-                readline.parse_and_bind("bind '\t' rl_complete")
-                self.logger.debug("Using libedit Tab binding.")
-            else: # GNU readline
-                readline.parse_and_bind("tab: complete")
-                self.logger.debug("Using standard readline Tab binding.")
+                # Configure Tab key binding
+                if 'libedit' in readline.__doc__: # macOS/libedit
+                    readline.parse_and_bind("bind -e") # Ensure emacs mode
+                    readline.parse_and_bind("bind '\t' rl_complete")
+                    self.logger.debug("Using libedit Tab binding.")
+                else: # GNU readline
+                    readline.parse_and_bind("tab: complete")
+                    self.logger.debug("Using standard readline Tab binding.")
 
-        except Exception as e:
-            self.logger.error(f"Failed to configure readline completion: {e}", exc_info=True)
+            except Exception as e:
+                self.logger.error(f"Failed to configure readline completion: {e}", exc_info=True)
 
 
         # --- History Setup ---
