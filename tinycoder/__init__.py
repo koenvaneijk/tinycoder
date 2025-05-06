@@ -1380,11 +1380,17 @@ class App:
 
     def run(self):
         """Main loop for the chat application."""
+        # Determine repo map status string
+        repo_map_status = "Enabled" if self.include_repo_map else "Disabled"
+        
         # Use FmtColors and STYLES for the welcome message
         # Apply specific color (GREEN) before BOLD, then RESET immediately after.
         # The rest of the message will use the default INFO format (terminal default color).
         self.logger.info(
-            f"Welcome to {FmtColors['GREEN']}{STYLES['BOLD']}{APP_NAME}{RESET}! Model: {FmtColors['GREEN']}{STYLES['BOLD']}{self.model}{RESET}. Type /help for commands, !<cmd> to run shell commands.",
+            f"Welcome to {FmtColors['GREEN']}{STYLES['BOLD']}{APP_NAME}{RESET}! "
+            f"Model: {FmtColors['GREEN']}{STYLES['BOLD']}{self.model}{RESET}. "
+            f"Repo Map: {FmtColors['BLUE']}{STYLES['BOLD']}{repo_map_status}{RESET}. "
+            f"Type /help for commands, !<cmd> to run shell commands.",
         )
 
         ctrl_c_pressed_once = False # Initialize flag outside the loop
