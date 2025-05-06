@@ -7,7 +7,7 @@ import tinycoder.requests as requests
 from tinycoder.llms.base import LLMClient
 
 # Default model
-DEFAULT_TOGETHER_MODEL = "Qwen/Qwen3-235B-A22B-fp8-tput"
+DEFAULT_TOGETHER_MODEL = "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
 TOGETHER_API_ENDPOINT = "https://api.together.xyz/v1/chat/completions"
 TOGETHER_API_KEY_ENV_VAR = "TOGETHER_API_KEY"
 
@@ -39,6 +39,10 @@ class TogetherAIClient(LLMClient):
             sys.exit(1)
 
         resolved_model = model or DEFAULT_TOGETHER_MODEL
+        # Remove 'together-' prefix if present
+        if resolved_model and resolved_model.startswith("together-"):
+            resolved_model = resolved_model[9:]  # Remove 'together-' prefix
+            
         super().__init__(model=resolved_model, api_key=resolved_api_key)
 
         self.api_url = TOGETHER_API_ENDPOINT
@@ -106,9 +110,16 @@ class TogetherAIClient(LLMClient):
         }
 
         try:
+            print(f"Debug - Using model: {self.model}")
+            print(f"Debug - Sending payload: {json.dumps(payload)[:500]}...")
+            
             response = requests.post(
                 self.api_url, headers=self.headers, json=payload, timeout=180
             )
+            
+            print(f"Debug - Response status: {response.status_code}")
+            print(f"Debug - Response text: {response.text[:500]}...")
+            
             response.raise_for_status()  # Check for HTTP errors
 
             response_data = response.json()

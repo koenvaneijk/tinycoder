@@ -8,8 +8,8 @@ import subprocess
 import sys
 import traceback
 from pathlib import Path
-from typing import List, Set, Dict, Optional, Any, Tuple, Union
-import atexit # For readline history
+from typing import List, Set, Dict, Optional, Any
+import atexit
 
 try:
     import readline
@@ -24,14 +24,22 @@ from tinycoder.command_handler import CommandHandler
 from tinycoder.edit_parser import EditParser
 from tinycoder.file_manager import FileManager
 from tinycoder.git_manager import GitManager
-# Ensure FileManager is imported if CommandCompleter uses it explicitly via type hint
 from tinycoder.file_manager import FileManager
-from tinycoder.llms import create_llm_client, LLMClient
+from tinycoder.llms.base import LLMClient
+from tinycoder.llms.anthropic import AnthropicClient
+from tinycoder.llms.gemini import GeminiClient
+from tinycoder.llms.ollama import OllamaClient, DEFAULT_OLLAMA_MODEL, DEFAULT_OLLAMA_HOST
+from tinycoder.llms.together_ai import TogetherAIClient, DEFAULT_TOGETHER_MODEL
+from tinycoder.llms.deepseek import DeepSeekClient
+from tinycoder.llms import create_llm_client
 from tinycoder.prompt_builder import PromptBuilder
 from tinycoder.repo_map import RepoMap
 from tinycoder.ui.console_interface import ring_bell
 from tinycoder.ui.log_formatter import ColorLogFormatter, STYLES, COLORS as FmtColors, RESET
 from tinycoder.ui.spinner import Spinner
+
+# Default gemini model (non-standard import location to avoid circular import)
+DEFAULT_GEMINI_MODEL = "gemini-2.5-pro-preview-03-25"
 
 import importlib.resources
 
@@ -168,10 +176,6 @@ class CommandCompleter:
         # self.logger.debug("Line doesn't match known completion prefixes.")
         self.matches = []
         return None
-
-
-# --- End Readline Configuration ---
-
 
 
 class App:
