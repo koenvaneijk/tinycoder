@@ -111,14 +111,14 @@ class TogetherAIClient(LLMClient):
 
         try:
             print(f"Debug - Using model: {self.model}")
-            print(f"Debug - Sending payload: {json.dumps(payload)[:500]}...")
+            print(f"Debug - Sending payload: {json.dumps(payload)}...")
             
             response = requests.post(
                 self.api_url, headers=self.headers, json=payload, timeout=180
             )
             
             print(f"Debug - Response status: {response.status_code}")
-            print(f"Debug - Response text: {response.text[:500]}...")
+            print(f"Debug - Response text: {response.text}...")
             
             response.raise_for_status()  # Check for HTTP errors
 

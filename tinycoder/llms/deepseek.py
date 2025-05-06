@@ -87,9 +87,6 @@ def answer(
     if tools:
         payload["tools"] = tools
         payload["tool_choice"] = tool_choice
-        logger.info(f"Calling DeepSeek API with tools. Tool choice: {tool_choice}")
-    else:
-        logger.info("Calling DeepSeek API without tools.")
 
     if stream:
         # Wrap the streaming logic in a separate generator function
