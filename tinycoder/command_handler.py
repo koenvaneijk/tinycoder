@@ -2,7 +2,6 @@ import re
 import logging
 from typing import TYPE_CHECKING, Callable, Optional, Tuple
 
-# Import the new test runner function
 from tinycoder.test_runner import run_tests
 
 if TYPE_CHECKING:
@@ -27,13 +26,10 @@ class CommandHandler:
         git_commit_func: Callable[[], None],
         git_undo_func: Callable[[], None],
         app_name: str,
-        # --- Add Rule Management Functions ---
         list_rules_func: Callable[[], str],
         enable_rule_func: Callable[[str], bool],
         disable_rule_func: Callable[[str], bool],
-        # --- Add Repo Map Toggle Function ---
         toggle_repo_map_func: Callable[[bool], None],
-        # --- Add Get Repo Map String Function ---
         get_repo_map_str_func: Callable[[], str],
     ):
         """
@@ -64,13 +60,10 @@ class CommandHandler:
         self.git_commit_func = git_commit_func
         self.git_undo_func = git_undo_func
         self.app_name = app_name
-        # --- Store Rule Management Functions ---
         self.list_rules = list_rules_func
         self.enable_rule = enable_rule_func
         self.disable_rule = disable_rule_func
-        # --- Store Repo Map Toggle Function ---
         self.toggle_repo_map = toggle_repo_map_func
-        # --- Store Get Repo Map String Function ---
         self.get_repo_map_str_func = get_repo_map_str_func
         self.logger = logging.getLogger(__name__)
 
@@ -157,8 +150,6 @@ class CommandHandler:
         elif command == "/tests":
             if args:
                 self.logger.warning("/tests command does not accept arguments.")
-            # Assuming run_tests signature might change or needs adjustment
-            # Pass necessary logging/writing functions if required by run_tests
             run_tests(
                  self.write_history_func,
                  self.git_manager,
@@ -175,7 +166,6 @@ class CommandHandler:
                     self.logger.info(f"- {fname}")
             return True, None
 
-        # --- Handle /rules command ---
         elif command == "/rules":
             rule_parts = args.split(maxsplit=1)
             sub_command = rule_parts[0] if rule_parts else "list" # Default to list
@@ -200,19 +190,15 @@ class CommandHandler:
                 self.logger.error(f"Unknown /rules sub-command: {sub_command}. Use 'list', 'enable', or 'disable'.")
             return True, None
 
-        # --- Handle /repomap command ---
         elif command == "/repomap":
             if args == "on":
                 self.toggle_repo_map(True)
-                # Confirmation message is printed by the toggle_repo_map function via logger
             elif args == "off":
                 self.toggle_repo_map(False)
-                # Confirmation message is printed by the toggle_repo_map function via logger
             elif args == "show":
                 repo_map_content = self.get_repo_map_str_func()
                 if repo_map_content and repo_map_content != "Repository map is not available at this moment." and repo_map_content.strip() != "Repository Map (other files):": # Check if map is truly empty
-                    # Using logger.info will ensure consistent formatting with other app messages
-                    # No need for explicit print here, as logger already prints to console
+
                     self.logger.info("--- Current Repository Map ---\n" + repo_map_content)
                 else:
                     self.logger.info("Repository map is currently empty or contains no files to display (excluding files already in chat context).")
@@ -223,7 +209,6 @@ class CommandHandler:
             return True, None
 
         elif command == "/help":
-            # Added /rules commands to help text
             help_text = f"""Available commands:
   /add <file1> ["file 2"]...  Add file(s) to the chat context.
   /drop <file1> ["file 2"]... Remove file(s) from the chat context.
