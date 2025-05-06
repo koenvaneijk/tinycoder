@@ -5,7 +5,7 @@ import os
 import termios
 import fcntl
 import io
-from typing import List # For type hinting argv
+from typing import List, Optional
 
 def inject_text(text_to_inject: str) -> bool:
     """
