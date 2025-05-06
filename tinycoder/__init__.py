@@ -31,6 +31,7 @@ from tinycoder.llms.base import LLMClient
 from tinycoder.llms import create_llm_client
 from tinycoder.prompt_builder import PromptBuilder
 from tinycoder.repo_map import RepoMap
+from tinycoder.rule_manager import RuleManager # Added RuleManager import
 from tinycoder.ui.console_interface import ring_bell
 from tinycoder.ui.command_completer import CommandCompleter, READLINE_AVAILABLE as COMPLETION_READLINE_AVAILABLE # Import renamed to avoid clash
 from tinycoder.ui.log_formatter import ColorLogFormatter, STYLES, COLORS as FmtColors, RESET
@@ -55,7 +56,7 @@ class App:
         self._setup_git()
         self._init_core_managers(continue_chat)
         self._init_prompt_builder()
-        self._setup_rules()
+        self._setup_rules_manager() # Renamed for clarity
         self._init_app_state()
         self._init_command_handler()
         self._configure_readline()
@@ -177,27 +178,31 @@ class App:
         self.prompt_builder = PromptBuilder(self.file_manager, self.repo_map)
         self.logger.debug("PromptBuilder initialized.")
 
-    def _setup_rules(self) -> None:
-        """Determines project identifier, config paths, discovers and loads rules."""
-        # Determine project identifier based on final git_root status
-        self.project_identifier = self._get_project_identifier()
-        self.logger.debug(f"Project identifier set to: {self.project_identifier}")
+    def _setup_rules_manager(self) -> None:
+        """Initializes the RuleManager."""
+        project_identifier = self._get_project_identifier()
+        self.logger.debug(f"Project identifier for rules: {project_identifier}")
 
-        # Determine config path based on OS
         if platform.system() == "Windows":
             config_dir = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming")) / APP_NAME
-        elif platform.system() == "Darwin": # macOS
+        elif platform.system() == "Darwin":  # macOS
             config_dir = Path.home() / "Library" / "Application Support" / APP_NAME
-        else: # Linux and other Unix-like systems
+        else:  # Linux and other Unix-like systems
             config_dir = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / APP_NAME
-        self.rules_config_path = config_dir / "rules_config.json"
-        self.logger.debug(f"Rules configuration path: {self.rules_config_path}")
+        
+        rules_config_path = config_dir / "rules_config.json"
+        self.logger.debug(f"Rules configuration path: {rules_config_path}")
 
-        # Discover and load rules
-        self.discovered_rules: Dict[str, Dict[str, Any]] = {}
-        self.active_rules_content: str = ""
-        self._discover_rules() # Calls the discovery method
-        self._load_active_rules() # Loads enabled rules based on discovery and config
+        # Determine base directory for custom rules (git_root or cwd)
+        base_dir_for_rules = Path(self.git_root) if self.git_root else Path.cwd()
+
+        self.rule_manager = RuleManager(
+            project_identifier=project_identifier,
+            rules_config_path=rules_config_path,
+            base_dir=base_dir_for_rules,
+            logger=self.logger # Pass the App's logger instance
+        )
+        self.logger.debug("RuleManager initialized.")
 
     def _init_app_state(self) -> None:
         """Initializes basic application state variables."""
@@ -311,9 +316,9 @@ class App:
             git_commit_func=self._git_add_commit,
             git_undo_func=self._git_undo,
             app_name=APP_NAME,
-            enable_rule_func=self.enable_rule,
-            disable_rule_func=self.disable_rule,
-            list_rules_func=self.list_rules,
+            enable_rule_func=self.rule_manager.enable_rule,     # Delegated
+            disable_rule_func=self.rule_manager.disable_rule,   # Delegated
+            list_rules_func=self.rule_manager.list_rules,       # Delegated
             toggle_repo_map_func=self.toggle_repo_map,
             get_repo_map_str_func=self._get_current_repo_map_string, # Pass the get map string function
             suggest_files_func=self._ask_llm_for_files_based_on_context,
@@ -372,36 +377,8 @@ class App:
         else:
             return str(Path.cwd().resolve())
 
-    # --- Rule Management Methods ---
-
-    def _load_rules_config(self) -> Dict[str, Any]:
-        """Loads the global rules configuration from the JSON file."""
-        if not self.rules_config_path.exists():
-            return {}
-        try:
-            with open(self.rules_config_path, "r", encoding="utf-8") as f:
-                config = json.load(f)
-                # Basic validation: ensure it's a dictionary
-                if not isinstance(config, dict):
-                    self.logger.error(f"Invalid format in {self.rules_config_path}. Expected a JSON object. Ignoring config.")
-                    return {}
-                return config
-        except json.JSONDecodeError:
-            self.logger.error(f"Error decoding JSON from {self.rules_config_path}. Ignoring config.")
-            return {}
-        except Exception as e:
-            self.logger.error(f"Failed to read rules config {self.rules_config_path}: {e}")
-            return {}
-
-    def _save_rules_config(self, config: Dict[str, Any]):
-        """Saves the global rules configuration to the JSON file."""
-        try:
-            # Ensure the directory exists
-            self.rules_config_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.rules_config_path, "w", encoding="utf-8") as f:
-                json.dump(config, f, indent=2)
-        except Exception as e:
-            self.logger.error(f"Failed to save rules config to {self.rules_config_path}: {e}")
+    # Rule management methods are now in RuleManager.
+    # Kept _configure_readline and _save_readline_history here as they are UI/App concerns.
 
     def _configure_readline(self):
         """Configures readline for history and command completion if available."""
@@ -481,252 +458,7 @@ class App:
         except Exception as e:
             self.logger.error(f"Failed to save readline history to {self.history_file}: {e}")
 
-
-    def _discover_rules(self):
-        """Discovers built-in and custom rules."""
-        self.discovered_rules = {}
-        num_built_in = 0
-        num_custom = 0
-
-        # 1. Discover Built-in Rules
-        try:
-            builtin_rules_pkg = "tinycoder.rules"
-            # Use files() for modern importlib.resources usage
-            if sys.version_info >= (3, 9):
-                resource_files = importlib.resources.files(builtin_rules_pkg)
-                for item in resource_files.iterdir():
-                    if item.is_file() and item.name.endswith(".md") and item.name != "__init__.py":
-                        rule_name = item.stem
-                        title = rule_name.replace("_", " ").title()
-                        self.discovered_rules[rule_name] = {
-                            "type": "builtin",
-                            "path": item.name, # Store resource name relative to package
-                            "title": title,
-                        }
-                        num_built_in += 1
-
-            else: # Fallback for older Python versions (less direct)
-                 # This path is less robust, relying on __path__ which might not always work perfectly
-                 import tinycoder.builtin_rules as rules_module
-                 if hasattr(rules_module, '__path__'):
-                     pkg_path = Path(rules_module.__path__[0])
-                     for rule_file in pkg_path.glob("*.md"):
-                         if rule_file.is_file() and rule_file.name != "__init__.py":
-                            rule_name = rule_file.stem
-                            title = rule_name.replace("_", " ").title()
-                            self.discovered_rules[rule_name] = {
-                                "type": "builtin",
-                                "path": rule_file.name, # Store filename relative to package dir
-                                "title": title,
-                             }
-                            num_built_in += 1
-
-
-        except (ModuleNotFoundError, FileNotFoundError, Exception) as e:
-            self.logger.warning(f"Could not discover built-in rules: {e}")
-
-        # 2. Discover Custom Rules
-        base_dir = Path(self.git_root) if self.git_root else Path.cwd()
-        custom_rules_dir = base_dir / ".tinycoder" / "rules"
-        if custom_rules_dir.is_dir():
-            for rule_file in custom_rules_dir.glob("*.md"):
-                if rule_file.is_file():
-                    rule_name = rule_file.stem
-                    title = rule_name.replace("_", " ").title()
-                    # Custom rules overwrite built-in ones if names clash
-                    if rule_name in self.discovered_rules and self.discovered_rules[rule_name]['type'] == 'builtin':
-                       self.logger.info(f"Custom rule '{rule_name}' overrides built-in rule.")
-                       num_built_in -= 1 # Decrement built-in count as it's overridden
-
-                    self.discovered_rules[rule_name] = {
-                        "type": "custom",
-                        "path": rule_file.resolve(), # Store absolute Path for custom rules
-                        "title": title,
-                    }
-                    num_custom += 1
-
-        self.logger.debug(f"Discovered {num_built_in} built-in rule(s) and {num_custom} custom rule(s).")
-
-
-    def _get_enabled_rules_for_project(self) -> Set[str]:
-        """Gets the set of enabled rule names for the current project from the config."""
-        config = self._load_rules_config()
-        project_config = config.get(self.project_identifier, {})
-        # Ensure 'enabled_rules' exists and is a list, default to empty list
-        enabled_rules = project_config.get("enabled_rules", [])
-        if not isinstance(enabled_rules, list):
-            self.logger.warning(f"Invalid 'enabled_rules' format for project {self.project_identifier} in config. Expected a list, found {type(enabled_rules)}. Using empty list.")
-            return set()
-        return set(enabled_rules)
-
-
-    def _load_active_rules(self):
-        """Loads content of enabled rules (built-in and custom) for the current project."""
-        enabled_rule_names = self._get_enabled_rules_for_project()
-        active_rules_content_parts = []
-        loaded_rule_names = set() # Track loaded to ensure precedence
-
-        # Load custom rules first to ensure they have precedence
-        for rule_name, rule_info in self.discovered_rules.items():
-             if rule_name in enabled_rule_names and rule_info["type"] == "custom":
-                try:
-                    content = rule_info["path"].read_text(encoding="utf-8")
-                    active_rules_content_parts.append(
-                        f"### Rule: {rule_info['title']}\n\n{content.strip()}\n"
-                    )
-                    loaded_rule_names.add(rule_name)
-                except Exception as e:
-                     self.logger.error(f"Failed to read custom rule file {rule_info['path']}: {e}")
-
-        # Load enabled built-in rules only if not already loaded as custom
-        for rule_name, rule_info in self.discovered_rules.items():
-            if rule_name in enabled_rule_names and rule_info["type"] == "builtin" and rule_name not in loaded_rule_names:
-                try:
-                    # Use importlib.resources to read built-in content
-                    builtin_rules_pkg = "tinycoder.rules"
-                    # Ensure path is treated as resource name within package
-                    resource_name = str(rule_info['path'])
-                    content = importlib.resources.read_text(builtin_rules_pkg, resource_name, encoding="utf-8")
-                    active_rules_content_parts.append(
-                        f"### Rule: {rule_info['title']}\n\n{content.strip()}\n"
-                    )
-                    loaded_rule_names.add(rule_name)
-                except Exception as e:
-                    self.logger.error(f"Failed to read built-in rule resource {rule_info['path']}: {e}")
-
-
-        self.active_rules_content = "\n".join(active_rules_content_parts)
-        if loaded_rule_names:
-             self.logger.info(f"Loaded {len(loaded_rule_names)} active rule(s) for this project: {', '.join(sorted(loaded_rule_names))}")
-        else:
-             self.logger.info("No active rules enabled or loaded for this project.")
-
-    def _get_rule_content(self, rule_name: str) -> Optional[str]:
-        """Reads the content of a specific rule (built-in or custom)."""
-        if rule_name not in self.discovered_rules:
-            self.logger.error(f"Attempted to get content for unknown rule: {rule_name}")
-            return None
-
-        rule_info = self.discovered_rules[rule_name]
-        try:
-            if rule_info["type"] == "custom":
-                return rule_info["path"].read_text(encoding="utf-8")
-            elif rule_info["type"] == "builtin":
-                builtin_rules_pkg = "tinycoder.rules"
-                resource_name = str(rule_info['path'])
-                return importlib.resources.read_text(builtin_rules_pkg, resource_name, encoding="utf-8")
-            else:
-                self.logger.error(f"Unknown rule type '{rule_info['type']}' for rule '{rule_name}'")
-                return None
-        except Exception as e:
-            self.logger.error(f"Failed to read content for rule '{rule_name}': {e}")
-            return None
-
-
-    def list_rules(self) -> str:
-        """
-        Returns a formatted string listing discovered rules and their status,
-        separated by type, sorted alphabetically, and including token estimates.
-        """
-        if not self.discovered_rules:
-            return "No rules (built-in or custom) discovered."
-
-        enabled_rules = self._get_enabled_rules_for_project()
-        builtin_lines = []
-        custom_lines = []
-
-        # Separate and sort rules
-        sorted_rule_names = sorted(self.discovered_rules.keys())
-
-        for rule_name in sorted_rule_names:
-            rule_info = self.discovered_rules[rule_name]
-            status_marker = "[✓]" if rule_name in enabled_rules else "[ ]"
-
-            # Get content to calculate tokens
-            content = self._get_rule_content(rule_name)
-            token_estimate = len(content) // 4 if content else 0
-            token_str = f" (~{token_estimate} tokens)"
-
-            if rule_info['type'] == 'builtin':
-                builtin_lines.append(f" {status_marker} {rule_name}{token_str}")
-            elif rule_info['type'] == 'custom':
-                # Show relative path for custom rules if possible
-                try:
-                    rel_path = rule_info['path'].relative_to(Path.cwd())
-                    origin = f"(./{rel_path})"
-                except ValueError: # If path is not relative to CWD
-                    origin = f"({rule_info['path']})"
-                custom_lines.append(f" {status_marker} {rule_name}{token_str} {origin}")
-            else:
-                 # Should not happen, but good to handle
-                 self.logger.warning(f"Skipping rule '{rule_name}' with unknown type '{rule_info['type']}'.")
-
-        output_lines = []
-        if builtin_lines:
-            output_lines.append("--- Built-in Rules ---")
-            output_lines.extend(builtin_lines)
-        if custom_lines:
-            if output_lines: # Add separator if built-in rules were listed
-                 output_lines.append("")
-            output_lines.append("--- Custom Rules ---")
-            output_lines.extend(custom_lines)
-
-        if not output_lines: # Case where discovery finds something but it's an unknown type
-            return "No valid built-in or custom rules discovered to list."
-
-        return "\n".join(output_lines)
-
-
-    def enable_rule(self, rule_name: str) -> bool:
-        """Enables a rule for the current project and reloads active rules."""
-        if rule_name not in self.discovered_rules:
-            self.logger.error(f"Rule '{rule_name}' not found.")
-            return False
-
-        config = self._load_rules_config()
-        project_config = config.setdefault(self.project_identifier, {"enabled_rules": []})
-        # Ensure 'enabled_rules' is a list within the project config
-        if not isinstance(project_config.get("enabled_rules"), list):
-            project_config["enabled_rules"] = [] # Reset if invalid type found
-
-        if rule_name not in project_config["enabled_rules"]:
-            project_config["enabled_rules"].append(rule_name)
-            self._save_rules_config(config)
-            self._load_active_rules() # Reload active rules
-            self.logger.info(f"Rule '{rule_name}' enabled for this project.")
-        else:
-            self.logger.info(f"Rule '{rule_name}' is already enabled.")
-        return True
-
-
-    def disable_rule(self, rule_name: str) -> bool:
-        """Disables a rule for the current project and reloads active rules."""
-        if rule_name not in self.discovered_rules:
-            # Don't error if trying to disable a non-existent rule, just inform.
-            self.logger.warning(f"Rule '{rule_name}' not found, cannot disable.")
-            return False # Indicate rule wasn't found, though not strictly an error state
-
-        config = self._load_rules_config()
-        project_config = config.get(self.project_identifier)
-        if not project_config or "enabled_rules" not in project_config or rule_name not in project_config["enabled_rules"]:
-            self.logger.info(f"Rule '{rule_name}' is not currently enabled, nothing to disable.")
-            return True # Indicate success as the rule is effectively disabled
-
-        # Proceed with removal if the rule is present
-        try:
-            project_config["enabled_rules"].remove(rule_name)
-            self._save_rules_config(config)
-            self._load_active_rules() # Reload active rules
-            self.logger.info(f"Rule '{rule_name}' disabled for this project.")
-            return True
-        except ValueError: # Should not happen with the 'in' check, but defensive
-            self.logger.info(f"Rule '{rule_name}' was not found in the enabled list (concurrent modification?).")
-            return True # Still effectively disabled
-        except Exception as e:
-            self.logger.error(f"Error disabling rule '{rule_name}': {e}")
-            return False
-
-    # --- End Rule Management Methods ---
+    # --- End Rule Management Methods (Moved to RuleManager) ---
 
     def _get_multiline_input_readline(self):
         """
@@ -822,9 +554,10 @@ class App:
 
         # Use PromptBuilder to build the system prompt
         # Pass the loaded active rules content and the repo map state
+        active_rules = self.rule_manager.get_active_rules_content() # Get from RuleManager
         system_prompt_content = self.prompt_builder.build_system_prompt(
             self.mode,
-            self.active_rules_content, # Use the loaded active rules
+            active_rules,
             self.include_repo_map      # Pass the toggle state
         )
         system_prompt_msg = {"role": "system", "content": system_prompt_content}
