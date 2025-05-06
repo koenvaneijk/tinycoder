@@ -188,8 +188,8 @@ class App:
         self._init_core_managers(continue_chat)
         self._init_prompt_builder()
         self._setup_rules()
-        self._init_app_state()
-        self._init_command_handler()
+        self._init_app_state() # Initializes self.include_repo_map
+        self._init_command_handler() # Needs toggle_repo_map method defined first
         # Configure readline *after* core managers (like file_manager) are ready
         self._configure_readline()
         self._init_app_components() # Determines input func based on readline availability
@@ -333,10 +333,18 @@ class App:
     def _init_app_state(self) -> None:
         """Initializes basic application state variables."""
         self.coder_commits: Set[str] = set()
+        self.coder_commits: Set[str] = set()
         self.mode = "code" # Default mode
         self.lint_errors_found: Dict[str, str] = {}
         self.reflected_message: Optional[str] = None
-        self.logger.debug("Basic app state initialized (commits, mode, lint status).")
+        self.include_repo_map: bool = True # Default to including the repo map
+        self.logger.debug("Basic app state initialized (commits, mode, lint status, repo map toggle).")
+
+    def toggle_repo_map(self, state: bool) -> None:
+        """Sets the state for including the repo map in prompts."""
+        self.include_repo_map = state
+        status = "enabled" if state else "disabled"
+        self.logger.info(f"Repository map inclusion in prompts is now {status}.")
 
     def _init_command_handler(self) -> None:
         """Initializes the CommandHandler."""
@@ -354,6 +362,7 @@ class App:
             enable_rule_func=self.enable_rule,
             disable_rule_func=self.disable_rule,
             list_rules_func=self.list_rules,
+            toggle_repo_map_func=self.toggle_repo_map, # Pass the toggle function
         )
         self.logger.debug("CommandHandler initialized.")
 
@@ -846,9 +855,11 @@ class App:
             return None
 
         # Use PromptBuilder to build the system prompt
-        # Pass the loaded active rules content instead of the old custom_rules_content
+        # Pass the loaded active rules content and the repo map state
         system_prompt_content = self.prompt_builder.build_system_prompt(
-            self.mode, self.active_rules_content # Use the loaded active rules
+            self.mode,
+            self.active_rules_content, # Use the loaded active rules
+            self.include_repo_map      # Pass the toggle state
         )
         system_prompt_msg = {"role": "system", "content": system_prompt_content}
 
@@ -1132,8 +1143,10 @@ class App:
         """Asks the LLM to identify files needed for a given instruction."""
         self.logger.info("Asking LLM to identify relevant files...")
 
-        # Use PromptBuilder to build the identify files prompt
-        system_prompt = self.prompt_builder.build_identify_files_prompt()
+        # Use PromptBuilder to build the identify files prompt, passing repo map state
+        system_prompt = self.prompt_builder.build_identify_files_prompt(
+            include_map=self.include_repo_map
+        )
 
         history_for_files = [{"role": "user", "content": instruction}]
         self.spinner.start()

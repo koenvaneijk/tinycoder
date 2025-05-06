@@ -32,6 +32,8 @@ class CommandHandler:
         list_rules_func: Callable[[], str],
         enable_rule_func: Callable[[str], bool],
         disable_rule_func: Callable[[str], bool],
+        # --- Add Repo Map Toggle Function ---
+        toggle_repo_map_func: Callable[[bool], None],
     ):
         """
         Initializes the CommandHandler.
@@ -49,6 +51,7 @@ class CommandHandler:
             list_rules_func: Function to get formatted list of rules and status.
             enable_rule_func: Function to enable a rule by name.
             disable_rule_func: Function to disable a rule by name.
+            toggle_repo_map_func: Function to toggle repo map inclusion in prompts.
         """
         self.file_manager = file_manager
         self.git_manager = git_manager
@@ -63,6 +66,8 @@ class CommandHandler:
         self.list_rules = list_rules_func
         self.enable_rule = enable_rule_func
         self.disable_rule = disable_rule_func
+        # --- Store Repo Map Toggle Function ---
+        self.toggle_repo_map = toggle_repo_map_func
         self.logger = logging.getLogger(__name__)
 
     # _run_tests method removed
@@ -191,6 +196,20 @@ class CommandHandler:
                 self.logger.error(f"Unknown /rules sub-command: {sub_command}. Use 'list', 'enable', or 'disable'.")
             return True, None
 
+        # --- Handle /repomap command ---
+        elif command == "/repomap":
+            if args == "on":
+                self.toggle_repo_map(True)
+                # Confirmation message is printed by the toggle_repo_map function via logger
+            elif args == "off":
+                self.toggle_repo_map(False)
+                # Confirmation message is printed by the toggle_repo_map function via logger
+            elif not args:
+                 self.logger.error("Usage: /repomap <on|off>") # Error if no argument
+            else:
+                self.logger.error(f"Invalid argument for /repomap: '{args}'. Use 'on' or 'off'.")
+            return True, None
+
         elif command == "/help":
             # Added /rules commands to help text
             help_text = f"""Available commands:
@@ -207,6 +226,7 @@ class CommandHandler:
   /rules list                 List available built-in and custom rules and their status for this project.
   /rules enable <rule_name>   Enable a rule for this project.
   /rules disable <rule_name>  Disable a rule for this project.
+  /repomap [on|off]           Enable or disable inclusion of the repository map in prompts.
   /help                       Show this help message.
   /exit or /quit              Exit the application.
   !<shell_command>           Execute a shell command in the project directory."""
