@@ -22,9 +22,9 @@ TinyCoder is a Python-based tool designed to help you interact with Large Langua
 *   **🧠 Intelligent Context Building:**
     *   **File Management:** Easily add/remove files (`/add`, `/drop`, `/files`).
     *   **Automatic File Identification:** Suggests relevant files to add to the context based on your request (`/ask` for files feature).
-    *   **Repo Map:** Generates a high-level codebase map (`RepoMap`) for broader LLM understanding.
+    *   **Repo Map:** Generates a high-level codebase map (`RepoMap`) for broader LLM understanding. Controlled via `/repomap [on|off]`.
     *   **Smart Prompts:** Constructs detailed prompts using file content and repo structure (`PromptBuilder`).
-*   **🤖 Multiple LLM Support:** Works with **Google Gemini**, **DeepSeek**, and **Ollama**. Configure via `--model` flag and environment variables (`GEMINI_API_KEY`, `DEEPSEEK_API_KEY`).
+*   **🤖 Multiple LLM Support:** Works with **Google Gemini**, **DeepSeek**, **Anthropic**, **Together AI**, and **Ollama**. Configure via `--provider` and `--model` flags, or environment variables (`GEMINI_API_KEY`, `DEEPSEEK_API_KEY`, `ANTHROPIC_API_KEY`, `TOGETHER_API_KEY`).
 *   **✏️ Safe Code Editing:**
     *   Parses LLM responses using a structured XML format (`EditParser`).
     *   Applies changes with user confirmation and diff previews (`CodeApplier`).
@@ -39,9 +39,9 @@ TinyCoder is a Python-based tool designed to help you interact with Large Langua
 *   **📜 Rules Engine:**
     *   Define project-specific coding standards (e.g., `style_guide.md`) in `.tinycoder/rules/` (custom) or use built-in rules.
     *   Manage active rules per-project using `/rules list|enable|disable`.
-    *   Configuration stored in OS-specific config directory (e.g., `~/.config/tinycoder` on Linux).
+    *   Configuration stored in the user's standard application config directory.
 *   **🧪 Test Runner:** Execute project tests (like `pytest`) using the `/tests` command (`test_runner.py`).
-*   **💾 Chat History:** Persists conversations to `.tinycoder_history` in the user's local share directory (e.g., `~/.local/share/tinycoder` on Linux) (`ChatHistoryManager`) and allows resuming with `--continue-chat`.
+*   **💾 Chat History:** Persists conversations to `.tinycoder_history` in the user's standard application data directory (`ChatHistoryManager`) and allows resuming with `--continue-chat`.
 *   **⚙️ Command Handling:** Rich set of commands for session control (`CommandHandler`).
 *   **🐚 Shell Execution:** Run shell commands directly using `!<command>`. Output can optionally be added to the chat context.
 
@@ -73,28 +73,19 @@ python3 -m pip install -e .
 
 **🔑 API Keys:**
 
-*   Set the required environment variables for your chosen LLM:
+*   Set the required environment variables for your chosen cloud LLM provider:
     *   Gemini: `GEMINI_API_KEY`
     *   DeepSeek: `DEEPSEEK_API_KEY`
-*   Ollama typically runs locally and may not require a key.
+    *   Anthropic: `ANTHROPIC_API_KEY`
+    *   Together AI: `TOGETHER_API_KEY`
+*   Ollama runs locally and does not require an API key.
+*   You can also set `OLLAMA_HOST` if your Ollama instance is not at the default `http://localhost:11434`.
 
 ---
 
 ## ▶️ Usage
 
-**Start TinyCoder in your project's root directory:**
 
-```bash
-# Use default LLM (Gemini)
-tinycoder
-
-# Specify an LLM model (Ollama examples)
-tinycoder --model llama3
-tinycoder --model ollama/llama3 # Prefix is optional for Ollama
-# Specify Gemini (prefix required)
-tinycoder --model gemini-1.5-flash
-# Specify DeepSeek (prefix required)
-tinycoder --model deepseek-coder
 
 # Override Ollama host if not default
 export OLLAMA_HOST="http://my-ollama-server:11434"
@@ -123,6 +114,7 @@ tinycoder --code "Implement the function foo in service.py using utils.bar"
 *   `/rules list`: List available rules and their status for the project.
 *   `/rules enable <rule_name>`: Enable a specific rule.
 *   `/rules disable <rule_name>`: Disable a specific rule.
+*   `/repomap [on|off]`: Enable or disable including the repository map in prompts.
 *   `/clear`: Clear the chat history.
 *   `/reset`: Clear history and remove all files from context.
 *   `/help`: Show help message.
