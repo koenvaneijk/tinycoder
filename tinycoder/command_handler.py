@@ -34,6 +34,8 @@ class CommandHandler:
         disable_rule_func: Callable[[str], bool],
         # --- Add Repo Map Toggle Function ---
         toggle_repo_map_func: Callable[[bool], None],
+        # --- Add Get Repo Map String Function ---
+        get_repo_map_str_func: Callable[[], str],
     ):
         """
         Initializes the CommandHandler.
@@ -52,6 +54,7 @@ class CommandHandler:
             enable_rule_func: Function to enable a rule by name.
             disable_rule_func: Function to disable a rule by name.
             toggle_repo_map_func: Function to toggle repo map inclusion in prompts.
+            get_repo_map_str_func: Function to get the current repository map as a string.
         """
         self.file_manager = file_manager
         self.git_manager = git_manager
@@ -68,6 +71,8 @@ class CommandHandler:
         self.disable_rule = disable_rule_func
         # --- Store Repo Map Toggle Function ---
         self.toggle_repo_map = toggle_repo_map_func
+        # --- Store Get Repo Map String Function ---
+        self.get_repo_map_str_func = get_repo_map_str_func
         self.logger = logging.getLogger(__name__)
 
     # _run_tests method removed
@@ -204,10 +209,18 @@ class CommandHandler:
             elif args == "off":
                 self.toggle_repo_map(False)
                 # Confirmation message is printed by the toggle_repo_map function via logger
+            elif args == "show":
+                repo_map_content = self.get_repo_map_str_func()
+                if repo_map_content and repo_map_content != "Repository map is not available at this moment." and repo_map_content.strip() != "Repository Map (other files):": # Check if map is truly empty
+                    # Using logger.info will ensure consistent formatting with other app messages
+                    # No need for explicit print here, as logger already prints to console
+                    self.logger.info("--- Current Repository Map ---\n" + repo_map_content)
+                else:
+                    self.logger.info("Repository map is currently empty or contains no files to display (excluding files already in chat context).")
             elif not args:
-                 self.logger.error("Usage: /repomap <on|off>") # Error if no argument
+                 self.logger.error("Usage: /repomap <on|off|show>")
             else:
-                self.logger.error(f"Invalid argument for /repomap: '{args}'. Use 'on' or 'off'.")
+                self.logger.error(f"Invalid argument for /repomap: '{args}'. Use 'on', 'off', or 'show'.")
             return True, None
 
         elif command == "/help":
@@ -226,7 +239,7 @@ class CommandHandler:
   /rules list                 List available built-in and custom rules and their status for this project.
   /rules enable <rule_name>   Enable a rule for this project.
   /rules disable <rule_name>  Disable a rule for this project.
-  /repomap [on|off]           Enable or disable inclusion of the repository map in prompts.
+  /repomap [on|off|show]      Enable, disable, or show the inclusion of the repository map in prompts.
   /help                       Show this help message.
   /exit or /quit              Exit the application.
   !<shell_command>           Execute a shell command in the project directory."""

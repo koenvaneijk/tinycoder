@@ -346,6 +346,16 @@ class App:
         status = "enabled" if state else "disabled"
         self.logger.info(f"Repository map inclusion in prompts is now {status}.")
 
+    def _get_current_repo_map_string(self) -> str:
+        """Generates and returns the current repository map string."""
+        chat_files_rel = self.file_manager.get_files() # Set[str] of relative paths
+        # Ensure repo_map is initialized and has a root before generating
+        if self.repo_map and self.repo_map.root:
+            return self.repo_map.generate_map(chat_files_rel)
+        else:
+            self.logger.warning("RepoMap not fully initialized, cannot generate map string.")
+            return "Repository map is not available at this moment."
+
     def _init_command_handler(self) -> None:
         """Initializes the CommandHandler."""
         # Depends on several managers and methods
@@ -362,7 +372,8 @@ class App:
             enable_rule_func=self.enable_rule,
             disable_rule_func=self.disable_rule,
             list_rules_func=self.list_rules,
-            toggle_repo_map_func=self.toggle_repo_map, # Pass the toggle function
+            toggle_repo_map_func=self.toggle_repo_map,
+            get_repo_map_str_func=self._get_current_repo_map_string, # Pass the get map string function
         )
         self.logger.debug("CommandHandler initialized.")
 
