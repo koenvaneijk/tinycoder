@@ -40,14 +40,14 @@ def create_llm_client(model: Optional[str]) -> LLMClient:
     resolved_model_name: Optional[str] = model # Keep track of the name used
 
     if model and model.startswith("deepseek-"):
-        logger.info(f"Attempting to initialize DeepSeek client with model: {model}")
+        logger.debug(f"Attempting to initialize DeepSeek client with model: {model}")
         try:
             client = DeepSeekClient(model=model)
             resolved_model_name = client.model # Get potentially updated model name
         except Exception as e:
             raise ValueError(f"Error initializing DeepSeek client for model '{model}': {e}") from e
     elif model and model.startswith("gemini-"):
-        logger.info(f"Attempting to initialize Gemini client with model: {model}")
+        logger.debug(f"Attempting to initialize Gemini client with model: {model}")
         try:
             client = GeminiClient(model=model)
             resolved_model_name = client.model
@@ -63,14 +63,14 @@ def create_llm_client(model: Optional[str]) -> LLMClient:
             # Error initializing even the default model is critical
              raise ValueError(f"Error initializing default Gemini client ({resolved_model_name}): {e}") from e
     elif model and model.startswith("claude-"):
-        logger.info(f"Attempting to initialize Anthropic client with model: {model}")
+        logger.debug(f"Attempting to initialize Anthropic client with model: {model}")
         try:
             client = AnthropicClient(model=model)
             resolved_model_name = client.model
         except Exception as e:
             raise ValueError(f"Error initializing Anthropic client for model '{model}': {e}") from e
     elif model and model.startswith("together-"):
-        logger.info(f"Attempting to initialize Together.ai client with model: {model}")
+        logger.debug(f"Attempting to initialize Together.ai client with model: {model}")
         try:
             # Strip the "together-" prefix for the actual model name
             actual_model = model[len("together-"):]
