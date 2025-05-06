@@ -20,6 +20,7 @@ setuptools.setup(
         "console_scripts": [
             "tinycoder=tinycoder:main",
             "tc=tinycoder:main",
+            "ask=tinycoder.ask:main_ask",
         ],
     },
     classifiers=[
