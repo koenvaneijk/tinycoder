@@ -1,7 +1,6 @@
 import re
 import logging
-from typing import TYPE_CHECKING, Callable, Optional, Tuple, Set # Added Callable
-from pathlib import Path
+from typing import TYPE_CHECKING, Callable, Optional, Tuple
 
 # Import the new test runner function
 from tinycoder.test_runner import run_tests
