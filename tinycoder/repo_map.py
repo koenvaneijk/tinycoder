@@ -1,5 +1,4 @@
 import ast
-import sys
 import logging
 from html.parser import HTMLParser
 
@@ -104,36 +103,53 @@ class RepoMap:
 
     def get_definitions(self, file_path: Path) -> List[
         Union[
-            Tuple[str, str, int, str],
-            Tuple[str, str, int, List[Tuple[str, str, int, str]]],
+            Tuple[str, str, int, Optional[str]],  # Module definition (kind, name, lineno, doc)
+            Tuple[str, str, int, str, Optional[str]],  # Function definition (kind, name, lineno, args, doc)
+            Tuple[str, str, int, Optional[str], List[Tuple[str, str, int, str, Optional[str]]]], # Class definition (kind, name, lineno, doc, methods list)
         ]
     ]:
         """
-        Extracts top-level functions and classes (with methods) from a Python file.
+        Extracts module docstring, top-level functions and classes (with methods) from a Python file.
         Returns a list of tuples:
-        - ("Function", name, lineno, args_string)
-        - ("Class", name, lineno, [method_definitions])
-          - where method_definitions is list of ("Method", name, lineno, args_string)
+        - ("Module", filename, 0, first_docstring_line)
+        - ("Function", name, lineno, args_string, first_docstring_line)
+        - ("Class", name, lineno, first_docstring_line, [method_definitions])
+          - where method_definitions is list of ("Method", name, lineno, args_string, first_docstring_line)
         """
         definitions = []
         try:
             content = file_path.read_text(encoding="utf-8", errors="replace")
             tree = ast.parse(content, filename=str(file_path))
+
+            # Module docstring
+            module_docstring_full = ast.get_docstring(tree, clean=True)
+            module_docstring_first_line = self._get_first_docstring_line(module_docstring_full)
+            # Only add module entry if it has a docstring to avoid clutter
+            if module_docstring_first_line:
+                 definitions.append(("Module", file_path.name, 0, module_docstring_first_line))
+
             for node in ast.iter_child_nodes(tree):
                 if isinstance(node, ast.FunctionDef):
                     args_str = self._format_args(node.args)
-                    definitions.append(("Function", node.name, node.lineno, args_str))
+                    docstring_full = ast.get_docstring(node, clean=True)
+                    docstring_first_line = self._get_first_docstring_line(docstring_full)
+                    definitions.append(("Function", node.name, node.lineno, args_str, docstring_first_line))
                 elif isinstance(node, ast.ClassDef):
+                    class_docstring_full = ast.get_docstring(node, clean=True)
+                    class_docstring_first_line = self._get_first_docstring_line(class_docstring_full)
+                    
                     methods = []
                     for item in node.body:
-                        if isinstance(item, ast.FunctionDef):
+                        if isinstance(item, ast.FunctionDef): # Methods
                             method_args_str = self._format_args(item.args)
+                            method_docstring_full = ast.get_docstring(item, clean=True)
+                            method_docstring_first_line = self._get_first_docstring_line(method_docstring_full)
                             methods.append(
-                                ("Method", item.name, item.lineno, method_args_str)
+                                ("Method", item.name, item.lineno, method_args_str, method_docstring_first_line)
                             )
                     # Sort methods by line number
                     methods.sort(key=lambda x: x[2])
-                    definitions.append(("Class", node.name, node.lineno, methods))
+                    definitions.append(("Class", node.name, node.lineno, class_docstring_first_line, methods))
         except SyntaxError:
             # Ignore files with Python syntax errors for the definition map
             pass
@@ -142,6 +158,21 @@ class RepoMap:
                 f"Error parsing Python definitions for {file_path}: {e}"
             )
         return definitions
+
+    def _get_first_docstring_line(self, docstring: Optional[str]) -> Optional[str]:
+        """Extracts the first non-empty line from the first paragraph of a docstring."""
+        if not docstring: # docstring is after ast.get_docstring(clean=True)
+            return None
+        
+        # Split by \n\n to get the first paragraph/summary block.
+        first_paragraph = docstring.split("\n\n", 1)[0]
+        
+        # Take the first line of this paragraph.
+        lines_in_first_paragraph = first_paragraph.splitlines()
+        if lines_in_first_paragraph:
+            # Return the first line, stripped of any leading/trailing whitespace from that line itself.
+            return lines_in_first_paragraph[0].strip()
+        return None # Should be unreachable if first_paragraph was non-empty
 
     def get_html_structure(self, file_path: Path) -> List[str]:
         """
@@ -292,26 +323,50 @@ class RepoMap:
             definitions = self.get_definitions(file_path)
             if definitions:
                 file_map_lines = []
-                # Sort top-level items by line number
+                
+                module_docstring_line_str = ""
+                # Check if the first definition is a module docstring
+                if definitions and definitions[0][0] == "Module":
+                    module_entry = definitions.pop(0) # ("Module", filename, 0, docstring)
+                    if len(module_entry) > 3 and module_entry[3]: # Check if docstring exists
+                        module_docstring_line_str = f" # {module_entry[3]}"
+                
+                file_map_lines.append(f"\n`{rel_path_str}`:{module_docstring_line_str}")
+
+                # Sort remaining top-level items (functions, classes) by line number
                 definitions.sort(key=lambda x: x[2])
-                file_map_lines.append(f"\n`{rel_path_str}`:")
+
                 for definition in definitions:
                     kind = definition[0]
                     name = definition[1]
+                    # Function: (kind, name, lineno, args_str, docstring_first_line)
+                    # Class:    (kind, name, lineno, docstring_first_line, methods)
+                    
+                    docstring_display_str = ""
                     if kind == "Function":
                         args_str = definition[3]
-                        file_map_lines.append(f"  - def {name}({args_str})")
+                        docstring_first_line = definition[4]
+                        if docstring_first_line:
+                            docstring_display_str = f" # {docstring_first_line}"
+                        file_map_lines.append(f"  - def {name}({args_str}){docstring_display_str}")
                     elif kind == "Class":
-                        methods = definition[3]
-                        file_map_lines.append(f"  - class {name}")
-                        for (
-                            method_kind,
-                            method_name,
-                            method_lineno,
-                            method_args_str,
-                        ) in methods:
+                        class_docstring_first_line = definition[3]
+                        methods = definition[4] # List of method tuples
+                        if class_docstring_first_line:
+                            docstring_display_str = f" # {class_docstring_first_line}"
+                        file_map_lines.append(f"  - class {name}{docstring_display_str}")
+                        
+                        # Methods list contains: ("Method", name, lineno, args_str, docstring_first_line)
+                        for method_tuple in methods:
+                            method_name = method_tuple[1]
+                            method_args_str = method_tuple[3]
+                            method_docstring_first_line = method_tuple[4]
+                            
+                            method_doc_str = ""
+                            if method_docstring_first_line:
+                                method_doc_str = f" # {method_docstring_first_line}"
                             file_map_lines.append(
-                                f"    - def {method_name}({method_args_str})"
+                                f"    - def {method_name}({method_args_str}){method_doc_str}"
                             )
 
                 # --- Add Local Import Information ---
