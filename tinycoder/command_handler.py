@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from tinycoder.git_manager import GitManager
 
 # Define CommandHandlerReturn tuple for clarity
-CommandHandlerReturn = Tuple[bool, Optional[str]]
+CommandHandlerReturn = Tuple[bool, Optional[str]] # bool: continue_processing, Optional[str]: immediate_prompt_arg
 
 
 class CommandHandler:
@@ -31,6 +31,7 @@ class CommandHandler:
         disable_rule_func: Callable[[str], bool],
         toggle_repo_map_func: Callable[[bool], None],
         get_repo_map_str_func: Callable[[], str],
+        suggest_files_func: Callable[[Optional[str]], None],
     ):
         """
         Initializes the CommandHandler.
@@ -50,6 +51,7 @@ class CommandHandler:
             disable_rule_func: Function to disable a rule by name.
             toggle_repo_map_func: Function to toggle repo map inclusion in prompts.
             get_repo_map_str_func: Function to get the current repository map as a string.
+            suggest_files_func: Function to ask LLM for file suggestions and handle adding them.
         """
         self.file_manager = file_manager
         self.git_manager = git_manager
@@ -65,6 +67,7 @@ class CommandHandler:
         self.disable_rule = disable_rule_func
         self.toggle_repo_map = toggle_repo_map_func
         self.get_repo_map_str_func = get_repo_map_str_func
+        self.suggest_files_func = suggest_files_func
         self.logger = logging.getLogger(__name__)
 
     # _run_tests method removed
@@ -81,10 +84,10 @@ class CommandHandler:
         """
         parts = inp.strip().split(maxsplit=1)
         command = parts[0]
-        args = parts[1].strip() if len(parts) > 1 else ""
+        args_str = parts[1].strip() if len(parts) > 1 else ""
 
         if command == "/add":
-            filenames = re.findall(r"\"(.+?)\"|(\S+)", args)
+            filenames = re.findall(r"\"(.+?)\"|(\S+)", args_str)
             filenames = [name for sublist in filenames for name in sublist if name]
             if not filenames:
                 self.logger.error('Usage: /add <file1> ["file 2"] ...')
@@ -99,7 +102,7 @@ class CommandHandler:
             return True, None
 
         elif command == "/drop":
-            filenames = re.findall(r"\"(.+?)\"|(\S+)", args)
+            filenames = re.findall(r"\"(.+?)\"|(\S+)", args_str)
             filenames = [name for sublist in filenames for name in sublist if name]
             if not filenames:
                 self.logger.error('Usage: /drop <file1> ["file 2"] ...')
@@ -136,19 +139,25 @@ class CommandHandler:
         elif command == "/ask":
             self.set_mode("ask")
             self.logger.info("Switched to ASK mode. I will answer questions but not edit files.")
-            if args:
-                return True, args
+            if args_str:
+                return True, args_str
             return True, None
 
         elif command == "/code":
             self.set_mode("code")
             self.logger.info("Switched to CODE mode. I will try to edit files.")
-            if args:
-                return True, args
+            if args_str:
+                return True, args_str
+            return True, None
+        
+        elif command == "/suggest_files":
+            # args_str contains the optional instruction from the user
+            # The _ask_llm_for_files_based_on_context method handles if args_str is empty
+            self.suggest_files_func(args_str if args_str else None)
             return True, None
 
         elif command == "/tests":
-            if args:
+            if args_str:
                 self.logger.warning("/tests command does not accept arguments.")
             run_tests(
                  self.write_history_func,
@@ -167,7 +176,7 @@ class CommandHandler:
             return True, None
 
         elif command == "/rules":
-            rule_parts = args.split(maxsplit=1)
+            rule_parts = args_str.split(maxsplit=1)
             sub_command = rule_parts[0] if rule_parts else "list" # Default to list
             rule_name = rule_parts[1].strip() if len(rule_parts) > 1 else None
 
@@ -191,21 +200,21 @@ class CommandHandler:
             return True, None
 
         elif command == "/repomap":
-            if args == "on":
+            if args_str == "on":
                 self.toggle_repo_map(True)
-            elif args == "off":
+            elif args_str == "off":
                 self.toggle_repo_map(False)
-            elif args == "show":
+            elif args_str == "show":
                 repo_map_content = self.get_repo_map_str_func()
                 if repo_map_content and repo_map_content != "Repository map is not available at this moment." and repo_map_content.strip() != "Repository Map (other files):": # Check if map is truly empty
 
                     self.logger.info("--- Current Repository Map ---\n" + repo_map_content)
                 else:
                     self.logger.info("Repository map is currently empty or contains no files to display (excluding files already in chat context).")
-            elif not args:
+            elif not args_str:
                  self.logger.error("Usage: /repomap <on|off|show>")
             else:
-                self.logger.error(f"Invalid argument for /repomap: '{args}'. Use 'on', 'off', or 'show'.")
+                self.logger.error(f"Invalid argument for /repomap: '{args_str}'. Use 'on', 'off', or 'show'.")
             return True, None
 
         elif command == "/help":
@@ -213,6 +222,7 @@ class CommandHandler:
   /add <file1> ["file 2"]...  Add file(s) to the chat context.
   /drop <file1> ["file 2"]... Remove file(s) from the chat context.
   /files                      List files currently in the chat.
+  /suggest_files [instruction] Ask the LLM to suggest relevant files. Uses last user message if no instruction.
   /clear                      Clear the chat history.
   /reset                      Clear chat history and drop all files.
   /commit                     Commit the current changes made by {self.app_name}.

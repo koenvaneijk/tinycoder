@@ -337,6 +337,79 @@ class App:
             self.logger.warning("RepoMap not fully initialized, cannot generate map string.")
             return "Repository map is not available at this moment."
 
+    def _ask_llm_for_files_based_on_context(self, custom_instruction: Optional[str] = None) -> None:
+        """
+        Handles the /suggest_files command.
+        Asks the LLM for file suggestions based on custom instruction or last user message.
+        Then, prompts the user to add these files.
+        """
+        instruction = ""
+        if custom_instruction and custom_instruction.strip():
+            instruction = custom_instruction.strip()
+            self.logger.info(f"Suggesting files based on your query: '{instruction}'")
+        else:
+            history = self.history_manager.get_history()
+            # Find the last actual user message, skipping any tool messages or placeholders
+            last_user_message = next((msg['content'] for msg in reversed(history) if msg['role'] == 'user' and msg['content'] and not msg['content'].startswith("(placeholder)")), None)
+            if last_user_message:
+                instruction = last_user_message
+                self.logger.info("Suggesting files based on the last user message in history.")
+            else:
+                self.logger.warning("No custom instruction provided and no suitable user history found to base suggestions on.")
+                return
+
+        if not instruction:
+            self.logger.warning("Cannot suggest files without a valid instruction.")
+            return
+
+        suggested_files = self._ask_llm_for_files(instruction) # This method already logs its own findings
+
+        if suggested_files:
+            self.logger.info("LLM suggested the following files (relative to project root):")
+            for i, fname in enumerate(suggested_files):
+                self.logger.info(f"  {i+1}. {fname}")
+
+            try:
+                confirm_prompt = "Add files to context? (y/N, or list indices like '1,3'): "
+                confirm = input(confirm_prompt).strip().lower()
+            except EOFError:
+                confirm = "n"
+                print() 
+            except KeyboardInterrupt:
+                self.logger.info("\nFile addition cancelled by user.")
+                return
+
+            files_to_add = []
+            if confirm == 'y':
+                files_to_add = suggested_files
+            elif confirm and confirm != 'n':
+                try:
+                    indices_to_add = [int(x.strip()) - 1 for x in confirm.split(',') if x.strip().isdigit()]
+                    files_to_add = [suggested_files[i] for i in indices_to_add if 0 <= i < len(suggested_files)]
+                except (ValueError, IndexError):
+                    self.logger.warning("Invalid selection. No files will be added from suggestions.")
+
+            if files_to_add:
+                added_count = 0
+                successfully_added_fnames = []
+                for fname in files_to_add:
+                    if self.file_manager.add_file(fname): # add_file handles logging success/failure per file
+                        added_count += 1
+                        successfully_added_fnames.append(fname)
+                
+                if added_count > 0:
+                    self.history_manager.save_message_to_file_only(
+                        "tool",
+                        f"Added {added_count} file(s) to context from LLM suggestion: {', '.join(successfully_added_fnames)}"
+                    )
+                    self.logger.info(f"Added {added_count} file(s) to context: {', '.join(successfully_added_fnames)}")
+            else:
+                self.logger.info("No suggested files were added to the context.")
+        elif instruction: # _ask_llm_for_files was called but returned no files
+            self.logger.info("LLM did not suggest any files based on the provided instruction.")
+        # If instruction was empty, it's logged before calling _ask_llm_for_files
+
+
     def _init_command_handler(self) -> None:
         """Initializes the CommandHandler."""
         # Depends on several managers and methods
@@ -355,6 +428,7 @@ class App:
             list_rules_func=self.list_rules,
             toggle_repo_map_func=self.toggle_repo_map,
             get_repo_map_str_func=self._get_current_repo_map_string, # Pass the get map string function
+            suggest_files_func=self._ask_llm_for_files_based_on_context,
         )
         self.logger.debug("CommandHandler initialized.")
 
