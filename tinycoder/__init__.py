@@ -32,131 +32,17 @@ from tinycoder.llms import create_llm_client
 from tinycoder.prompt_builder import PromptBuilder
 from tinycoder.repo_map import RepoMap
 from tinycoder.ui.console_interface import ring_bell
+from tinycoder.ui.command_completer import CommandCompleter, READLINE_AVAILABLE as COMPLETION_READLINE_AVAILABLE # Import renamed to avoid clash
 from tinycoder.ui.log_formatter import ColorLogFormatter, STYLES, COLORS as FmtColors, RESET
 from tinycoder.ui.spinner import Spinner
+
 
 import importlib.resources
 
 APP_NAME = "tinycoder"
 COMMIT_PREFIX = "🤖 tinycoder: "
 HISTORY_FILE = ".tinycoder_history"
-USER_PREFS_FILE = "user_preferences.json" 
-
-class CommandCompleter:
-    """A readline completer class specifically for TinyCoder commands."""
-    def __init__(self, file_manager: 'FileManager', git_manager: 'GitManager'):
-        self.file_manager = file_manager
-        self.file_options: List[str] = []
-        self.matches: List[str] = []
-        self.logger = logging.getLogger(__name__)
-        self.git_manager = git_manager
-        
-        self._refresh_file_options()
-
-    def _refresh_file_options(self):
-        """Fetches the list of relative file paths from the FileManager."""
-        try:
-            base_path = self.file_manager.root if self.file_manager.root else Path.cwd()
-            repo_files: Set[str] = set()
-            base_path = self.file_manager.root if self.file_manager.root else Path.cwd()
-            self.logger.debug(f"Refreshing file options for completion based on: {base_path}")
-
-            if self.git_manager and self.git_manager.is_repo():
-                tracked_files = self.git_manager.get_tracked_files_relative()
-                repo_files.update(tracked_files)
-                self.logger.debug(f"Found {len(tracked_files)} tracked files via Git.")
-            else:
-                # Fallback: Walk the directory if not a git repo or git failed
-                self.logger.debug("Not a Git repo or Git unavailable, walking the directory...")
-                # Exclude common large/binary directories for performance
-                excluded_dirs = {'.git', '__pycache__', 'node_modules', '.venv', 'venv'}
-                for item in base_path.rglob('*'):
-                    # Check if the item is within any excluded directory
-                    if any(excluded in item.parts for excluded in excluded_dirs):
-                        continue
-                    if item.is_file():
-                        try:
-                            # Make path relative to the root used for walking
-                            rel_path = item.relative_to(base_path)
-                            # Normalize slashes for consistency
-                            repo_files.add(str(rel_path).replace('\\', '/'))
-                        except ValueError:
-                            # Should not happen if item is from rglob relative to base_path
-                            self.logger.warning(f"Could not make path relative: {item}")
-                        except Exception as walk_err:
-                            # Catch other potential errors during walk
-                            self.logger.warning(f"Error processing path during walk: {item} - {walk_err}")
-                self.logger.debug(f"Found {len(repo_files)} files via directory walk.")
-
-            # Always include files explicitly added to the chat context,
-            # even if they are untracked or outside the main discovery paths.
-            context_files = self.file_manager.get_files()
-            repo_files.update(context_files)
-            if context_files:
-                 self.logger.debug(f"Added {len(context_files)} files from current chat context.")
-
-            self.file_options = sorted(list(repo_files))
-            self.logger.debug(f"Total unique file options for completion: {len(self.file_options)}")
-
-        except Exception as e:
-            self.logger.error(f"Error refreshing file options for completion: {e}", exc_info=True)
-            # Fallback to just the files currently in context in case of error
-            self.file_options = sorted(list(self.file_manager.get_files()))
-
-
-    def complete(self, text: str, state: int) -> Optional[str]:
-        """Readline completion handler."""
-        # Refresh file options on every completion attempt for dynamic updates
-        # This might be slow for very large repos; consider caching if needed.
-        if state == 0: # Refresh only on the first call for a new completion sequence
-             self._refresh_file_options()
-
-        line = readline.get_line_buffer()
-        self.logger.debug(f"Readline complete called. Line: '{line}', Text: '{text}', State: {state}")
-
-        # --- Completion logic for /add ---
-        add_prefix = "/add "
-        if line.startswith(add_prefix):
-            # Path completion after /add
-            path_text = line[len(add_prefix):] # The part after "/add "
-
-            if state == 0:
-                # First call for this completion
-                # 'text' passed by readline is the word fragment it identified based on delimiters
-                # For '/add src/m', text should ideally be 'src/m'
-                # We need to find options that *start with* the path_text derived from the line
-                self.matches = sorted([
-                    p for p in self.file_options
-                    if p.startswith(path_text)
-                ])
-                self.logger.debug(f"Path text: '{path_text}', Options: {len(self.file_options)}, Matches found: {len(self.matches)}")
-                self.logger.debug(f"Matches: {self.matches[:5]}...") # Log first few matches
-
-            try:
-                # Readline expects the *completion* relative to 'text',
-                # or the full word if 'text' was empty.
-                # Since path_text is the part *after* '/add ', our matches ARE the full paths.
-                # Readline will handle replacing 'text' with the returned match.
-                match = self.matches[state]
-                self.logger.debug(f"Returning match {state}: '{match}' (relative to path_text: '{path_text}')")
-                # Return the full path match. Readline should handle the replacement correctly
-                # if delimiters are set properly.
-                return match
-            except IndexError:
-                # No more matches
-                self.logger.debug(f"No more matches for state {state}")
-                return None
-
-        # --- Add completion for other commands if needed ---
-        # Example: /drop
-        # drop_prefix = "/drop "
-        # if line.startswith(drop_prefix):
-        #    ... (similar logic using self.file_manager.get_files())
-
-        # --- Default: No completion if not a recognized command prefix ---
-        # self.logger.debug("Line doesn't match known completion prefixes.")
-        self.matches = []
-        return None
+USER_PREFS_FILE = "user_preferences.json"
 
 
 class App:
@@ -519,20 +405,27 @@ class App:
 
     def _configure_readline(self):
         """Configures readline for history and command completion if available."""
-        if not READLINE_AVAILABLE:
+        # Use the local READLINE_AVAILABLE for history, and the imported one for completer
+        if not READLINE_AVAILABLE: # This is the one defined in __init__.py for history
+            self.logger.info("Readline module not available for history features.")
+            # No return here yet, completion might still be attempted if COMPLETION_READLINE_AVAILABLE is true
+
+        if not COMPLETION_READLINE_AVAILABLE: # This is from command_completer.py
+            self.logger.info("Readline module not available for command completion features.")
+        
+        if not READLINE_AVAILABLE and not COMPLETION_READLINE_AVAILABLE:
             self.logger.info("Readline module not available. Skipping history and completion setup.")
-            # Optionally print a warning for the user if desired, but logger covers it.
-            # print("Warning: readline not available. Tab completion and history disabled.", file=sys.stderr)
             return
 
         self.logger.debug("Readline available. Configuring...")
 
         # --- Completion Setup ---
-        try:
-            completer_instance = CommandCompleter(self.file_manager, self.git_manager)
-            readline.set_completer(completer_instance.complete)
+        if COMPLETION_READLINE_AVAILABLE:
+            try:
+                completer_instance = CommandCompleter(self.file_manager, self.git_manager)
+                readline.set_completer(completer_instance.complete)
 
-            # Set delimiters for completion. Crucially, DO NOT include path separators like '/' or '.'
+                # Set delimiters for completion. Crucially, DO NOT include path separators like '/' or '.'
             # if you want to complete segments containing them. Let's stick to whitespace and typical shell separators.
             # Space is the most important delimiter here to separate `/add` from the path.
             readline.set_completer_delims(' \t\n`~!@#$%^&*()=+[{]}|;:\'",<>?') # Removed \ . /
@@ -551,32 +444,36 @@ class App:
 
 
         # --- History Setup ---
-        # Use project identifier for potentially project-specific history
-        # Or use a generic one in the user's home directory
-        hist_dir = Path.home() / ".local" / "share" / APP_NAME
-        hist_dir.mkdir(parents=True, exist_ok=True) # Ensure directory exists
-        # Use a consistent history filename
-        self.history_file = hist_dir / HISTORY_FILE
+        if READLINE_AVAILABLE: # Guard history setup with the local READLINE_AVAILABLE
+            # Use project identifier for potentially project-specific history
+            # Or use a generic one in the user's home directory
+            hist_dir = Path.home() / ".local" / "share" / APP_NAME
+            hist_dir.mkdir(parents=True, exist_ok=True) # Ensure directory exists
+            # Use a consistent history filename
+            self.history_file = hist_dir / HISTORY_FILE
 
-        try:
-            # Set history length (optional)
-            readline.set_history_length(1000)
-            # Read history file *after* setting bindings and completer, *before* registering save
-            if self.history_file.exists():
-                readline.read_history_file(self.history_file)
-                self.logger.debug(f"Read history from {self.history_file}")
-            else:
-                self.logger.debug(f"History file {self.history_file} not found, starting fresh.")
+            try:
+                # Set history length (optional)
+                readline.set_history_length(1000)
+                # Read history file *after* setting bindings and completer, *before* registering save
+                if self.history_file.exists():
+                    readline.read_history_file(self.history_file)
+                    self.logger.debug(f"Read history from {self.history_file}")
+                else:
+                    self.logger.debug(f"History file {self.history_file} not found, starting fresh.")
 
-            # Register saving history on exit
-            atexit.register(self._save_readline_history)
-            self.logger.debug("Readline history configured and loaded.")
-        except Exception as e:
-            self.logger.error(f"Failed to configure readline history: {e}", exc_info=True)
+                # Register saving history on exit
+                atexit.register(self._save_readline_history)
+                self.logger.debug("Readline history configured and loaded.")
+            except Exception as e:
+                self.logger.error(f"Failed to configure readline history: {e}", exc_info=True)
+        else:
+            self.logger.debug("Skipping readline history setup as readline is not available.")
+
 
     def _save_readline_history(self):
         """Saves the readline history to the designated file."""
-        if not READLINE_AVAILABLE:
+        if not READLINE_AVAILABLE: # Use local READLINE_AVAILABLE
             return
         try:
             readline.write_history_file(self.history_file)
@@ -1170,8 +1067,6 @@ class App:
         # 1. @entity mentions
         entity_mentions = re.findall(r'@([a-zA-Z_]\w*)', original_inp)
         
-        self.logger.info(f"Entity mentions found: {entity_mentions}")
-
         extracted_snippets_text = []
 
         if entity_mentions:
