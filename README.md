@@ -85,14 +85,41 @@ python3 -m pip install -e .
 
 ## ▶️ Usage
 
+**Start TinyCoder in your project's root directory:**
 
+You can specify the LLM provider and model:
+
+```bash
+# Use the default model for a specific provider
+tinycoder --provider gemini # Uses default Gemini model
+tinycoder --provider anthropic # Uses default Anthropic model
+tinycoder --provider together # Uses default Together AI model
+tinycoder --provider ollama # Uses default Ollama model (e.g., qwen3:14b)
+
+# Specify both provider and model name (no prefix needed on model)
+tinycoder --provider gemini --model gemini-1.5-flash
+tinycoder --provider deepseek --model deepseek-coder
+tinycoder --provider ollama --model llama3
+tinycoder --provider anthropic --model claude-3-sonnet-20240229
+
+# If --provider is omitted, --model assumes Ollama or uses legacy prefixes
+tinycoder --model llama3 # Assumes Ollama provider
+tinycoder --model gemini-1.5-pro # Uses legacy prefix detection
+tinycoder --model deepseek-coder # Uses legacy prefix detection
+# tinycoder --model my-custom-ollama-model # Assumes Ollama provider
+
+# Use the legacy flag (still supported)
+tinycoder --legacy-model gemini-1.5-flash
+
+# Load the last used model from user preferences (default behavior if no flags)
+tinycoder
 
 # Override Ollama host if not default
 export OLLAMA_HOST="http://my-ollama-server:11434"
-tinycoder --model mistral
+tinycoder --provider ollama --model mistral
 
 # Start with initial files and an instruction
-tinycoder src/main.py src/utils.py "Refactor the main loop in main.py"
+tinycoder --provider gemini src/main.py src/utils.py "Refactor the main loop in main.py"
 
 # Continue the last chat session
 tinycoder --continue-chat
