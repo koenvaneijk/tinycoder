@@ -25,13 +25,14 @@ class PromptBuilder:
         self.file_manager = file_manager
         self.repo_map = repo_map
 
-    def build_system_prompt(self, mode: str, custom_rules_content: str) -> str:
+    def build_system_prompt(self, mode: str, custom_rules_content: str, include_map: bool) -> str:
         """
         Builds the main system prompt including file list, repo map, and custom rules.
 
         Args:
             mode: The current application mode ("code" or "ask").
             custom_rules_content: The content of loaded custom rules.
+            include_map: Whether to include the repository map.
 
         Returns:
             The constructed system prompt string.
@@ -49,7 +50,11 @@ class PromptBuilder:
             # Fallback if FileManager has no root (e.g., not in git repo)
             self.repo_map.root = Path.cwd()
 
-        repomap_block = self.repo_map.generate_map(self.file_manager.get_files())
+        # Conditionally generate repo map
+        if include_map:
+            repomap_block = self.repo_map.generate_map(self.file_manager.get_files())
+        else:
+            repomap_block = "(Repository map generation is disabled by user)"
 
         prompt_template = ASK_PROMPT if mode == "ask" else BASE_PROMPT
         base = prompt_template.format(
@@ -63,11 +68,19 @@ class PromptBuilder:
                 combined_prompt += "\n\n## Custom Rules\n\n" + custom_rules_content
             return combined_prompt
         else:  # ask mode
+            # Ask mode does not use DIFF_PROMPT or custom rules directly in base
+            # If custom rules are needed for Ask, they should be part of ASK_PROMPT template
             return base
 
-    def build_identify_files_prompt(self) -> str:
+    def build_identify_files_prompt(self, include_map: bool) -> str:
         """
         Builds the prompt used to ask the LLM to identify relevant files.
+
+        Args:
+            include_map: Whether to include the repository map.
+
+        Returns:
+            The constructed prompt string.
         """
         # Ensure RepoMap uses the correct root
         if self.file_manager.root:
@@ -75,13 +88,15 @@ class PromptBuilder:
         else:
             self.repo_map.root = Path.cwd()
 
-        # Generate repo map of all files to help LLM identify existing files
-        repomap_block = self.repo_map.generate_map(set())  # Pass empty set for full map
-        return (
-            IDENTIFY_FILES_PROMPT
-            + "\n\nCurrent repository structure:\n"
-            + repomap_block
-        )
+        # Conditionally generate repo map
+        if include_map:
+            # Generate repo map of all files to help LLM identify existing files
+            repomap_block = self.repo_map.generate_map(set()) # Pass empty set for full map
+            map_section = "\n\nCurrent repository structure:\n" + repomap_block
+        else:
+            map_section = "\n\n(Repository map generation is disabled by user)"
+
+        return IDENTIFY_FILES_PROMPT + map_section
 
     def get_file_content_message(self) -> Optional[Dict[str, str]]:
         """
