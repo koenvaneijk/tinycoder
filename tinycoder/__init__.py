@@ -1117,13 +1117,6 @@ class App:
         # or just return the input string unchanged.
         return inp  # Currently returns input unchanged
 
-    def preproc_user_input(self, inp):
-        """Checks for file mentions and URLs in regular user input."""
-        # This method is now separate from _handle_command
-        # It should return the potentially modified input string
-        self.check_for_file_mentions(inp)
-        inp = self.check_for_urls(inp)
-        return inp
 
     def _extract_code_snippet(self, file_path_str: str, entity_name: str) -> Optional[str]:
         """
@@ -1176,6 +1169,9 @@ class App:
         
         # 1. @entity mentions
         entity_mentions = re.findall(r'@([a-zA-Z_]\w*)', original_inp)
+        
+        self.logger.info(f"Entity mentions found: {entity_mentions}")
+
         extracted_snippets_text = []
 
         if entity_mentions:
