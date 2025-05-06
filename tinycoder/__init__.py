@@ -11,11 +11,11 @@ from pathlib import Path
 from typing import List, Set, Dict, Optional, Any
 import atexit
 
+# readline is not available on all platforms (e.g., standard Windows cmd)
 try:
     import readline
     READLINE_AVAILABLE = True
 except ImportError:
-    # readline is not available on all platforms (e.g., standard Windows cmd)
     READLINE_AVAILABLE = False
 
 from tinycoder.chat_history import ChatHistoryManager
@@ -26,11 +26,6 @@ from tinycoder.file_manager import FileManager
 from tinycoder.git_manager import GitManager
 from tinycoder.file_manager import FileManager
 from tinycoder.llms.base import LLMClient
-from tinycoder.llms.anthropic import AnthropicClient
-from tinycoder.llms.gemini import GeminiClient
-from tinycoder.llms.ollama import OllamaClient, DEFAULT_OLLAMA_MODEL, DEFAULT_OLLAMA_HOST
-from tinycoder.llms.together_ai import TogetherAIClient, DEFAULT_TOGETHER_MODEL
-from tinycoder.llms.deepseek import DeepSeekClient
 from tinycoder.llms import create_llm_client
 from tinycoder.prompt_builder import PromptBuilder
 from tinycoder.repo_map import RepoMap
@@ -38,18 +33,12 @@ from tinycoder.ui.console_interface import ring_bell
 from tinycoder.ui.log_formatter import ColorLogFormatter, STYLES, COLORS as FmtColors, RESET
 from tinycoder.ui.spinner import Spinner
 
-# Default gemini model (non-standard import location to avoid circular import)
-DEFAULT_GEMINI_MODEL = "gemini-2.5-pro-preview-03-25"
-
 import importlib.resources
 
 APP_NAME = "tinycoder"
 COMMIT_PREFIX = "🤖 tinycoder: "
-HISTORY_FILE = ".tinycoder_history" # Define history file name
-USER_PREFS_FILE = "user_preferences.json" # Define preferences file name
-
-
-# --- Readline Configuration (only if available) ---
+HISTORY_FILE = ".tinycoder_history"
+USER_PREFS_FILE = "user_preferences.json" 
 
 class CommandCompleter:
     """A readline completer class specifically for TinyCoder commands."""
@@ -57,29 +46,19 @@ class CommandCompleter:
         self.file_manager = file_manager
         self.file_options: List[str] = []
         self.matches: List[str] = []
-        self.logger = logging.getLogger(__name__) # Get logger instance
+        self.logger = logging.getLogger(__name__)
         self.git_manager = git_manager
-        self._refresh_file_options() # Initial population
-        # Add logger if not already present (assuming App passes it or it's globally accessible)
-
+        
+        self._refresh_file_options()
 
     def _refresh_file_options(self):
         """Fetches the list of relative file paths from the FileManager."""
-        # Assuming FileManager has a method `get_all_repo_files`
-        # If not, this needs to be added to FileManager.
         try:
-            # Use file_manager's root for relativity if possible
             base_path = self.file_manager.root if self.file_manager.root else Path.cwd()
-            # Attempt to get files relative to the repo/project root
-            # TODO: Ensure get_all_repo_files() exists and returns relative paths.
-            # For now, simulate with get_files() which might only contain added files.
-            # Replace with a proper implementation later.
-            # Placeholder using get_files() - needs update
             repo_files: Set[str] = set()
             base_path = self.file_manager.root if self.file_manager.root else Path.cwd()
             self.logger.debug(f"Refreshing file options for completion based on: {base_path}")
 
-            # Use git_manager if available and in a repo
             if self.git_manager and self.git_manager.is_repo():
                 tracked_files = self.git_manager.get_tracked_files_relative()
                 repo_files.update(tracked_files)
@@ -179,8 +158,9 @@ class CommandCompleter:
 
 
 class App:
-    def __init__(self, model: Optional[str], files: List[str], continue_chat: bool):
+    def __init__(self, model: Optional[str], files: List[str], continue_chat: bool, verbose: bool = False):
         """Initializes the TinyCoder application."""
+        self.verbose = verbose  # Store verbose flag
         self._setup_logging()
         self._init_llm_client(model)
         self._init_spinner()
@@ -188,11 +168,10 @@ class App:
         self._init_core_managers(continue_chat)
         self._init_prompt_builder()
         self._setup_rules()
-        self._init_app_state() # Initializes self.include_repo_map
-        self._init_command_handler() # Needs toggle_repo_map method defined first
-        # Configure readline *after* core managers (like file_manager) are ready
+        self._init_app_state()
+        self._init_command_handler()
         self._configure_readline()
-        self._init_app_components() # Determines input func based on readline availability
+        self._init_app_components()
         self._log_final_status()
         self._add_initial_files(files)
 
@@ -200,14 +179,16 @@ class App:
     def _setup_logging(self) -> None:
         """Configures the root logger with colored output."""
         root_logger = logging.getLogger()
-        root_logger.setLevel(logging.INFO) # Or logging.DEBUG for more verbosity
+        # Set root logger level based on verbose flag
+        root_logger.setLevel(logging.DEBUG if self.verbose else logging.INFO)
 
         # Remove existing handlers to prevent duplicates
         for handler in root_logger.handlers[:]:
             root_logger.removeHandler(handler)
 
         ch = logging.StreamHandler(sys.stdout)
-        ch.setLevel(logging.INFO) # Only INFO and above will be shown via this handler
+        # Set stream handler level based on verbose flag
+        ch.setLevel(logging.DEBUG if self.verbose else logging.INFO)
 
         # Use terminal default color for INFO level messages
         log_format_info = "%(message)s"
@@ -550,6 +531,7 @@ class App:
                             "title": title,
                         }
                         num_built_in += 1
+
             else: # Fallback for older Python versions (less direct)
                  # This path is less robust, relying on __path__ which might not always work perfectly
                  import tinycoder.builtin_rules as rules_module
@@ -1603,7 +1585,6 @@ def main():
         help="The LLM provider to use (default: auto-detected or from TINYCODER_PROVIDER env var)",
     )
     
-    # Updated model argument - now just specifies the model within the provider
     parser.add_argument(
         "--model",
         metavar="MODEL_NAME",
@@ -1613,30 +1594,6 @@ def main():
             "Provider-specific model without needing prefixes. "
             "Default is provider-specific or from TINYCODER_MODEL env var."
         ),
-    )
-    
-    # Legacy model argument that includes provider prefix (for backward compatibility)
-    parser.add_argument(
-        "--legacy-model",
-        metavar="PREFIXED_MODEL_NAME",
-        default=None,
-        help=(
-            "(Legacy) LLM model including provider prefix. "
-            "Example prefixes: 'gemini-', 'claude-', 'together-'. "
-            "Models without recognized prefixes are treated as Ollama models."
-        ),
-    )
-    
-    parser.add_argument(
-        "--list-models",
-        action="store_true",
-        help="List available models for each provider and exit",
-    )
-    
-    parser.add_argument(
-        "--interactive-model",
-        action="store_true",
-        help="Start an interactive model selection prompt",
     )
     
     parser.add_argument(
@@ -1651,27 +1608,19 @@ def main():
         action="store_true",
         help="Continue from previous chat history instead of starting fresh.",
     )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Enable verbose output (DEBUG level logging).",
+    )
     
     args = parser.parse_args()
 
-    # Handle --list-models
-    if args.list_models:
-        list_available_models()
-        return
-
-    # Handle model selection
     model_str = None
     
-    # Check for interactive selection first
-    if args.interactive_model:
-        model_str = select_model_interactive()
-    
-    # If legacy model is specified, it takes precedence
-    elif args.legacy_model:
-        model_str = args.legacy_model
-    
     # Otherwise use provider + model combination
-    elif args.provider:
+    if args.provider:
         # Convert provider + model to the prefix format the backend expects
         if args.provider == "anthropic":
             model_name = args.model or "claude-3-7-sonnet-20250219"
@@ -1706,7 +1655,7 @@ def main():
         model_str = load_user_preference_model()
 
     # Initialize the app
-    coder = App(model=model_str, files=args.files, continue_chat=args.continue_chat)
+    coder = App(model=model_str, files=args.files, continue_chat=args.continue_chat, verbose=args.verbose)
 
     # Save the model preference for next time
     save_user_preference(coder.client.__class__.__name__, coder.model)
