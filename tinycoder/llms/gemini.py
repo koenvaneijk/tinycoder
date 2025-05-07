@@ -94,7 +94,7 @@ class GeminiClient(LLMClient):  # Inherit from LLMClient
         try:
             # Make the POST request using the (potentially local) requests module
             response = requests.post(
-                self.api_url, headers=headers, json=payload, timeout=180
+                self.api_url, headers=headers, json=payload, timeout=600
             )  # Longer timeout
             response.raise_for_status()  # Raise HTTPError for bad responses (4xx or 5xx)
 
