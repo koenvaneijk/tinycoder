@@ -1,15 +1,11 @@
 import logging
 import os
 import platform
-# import shlex # No longer used directly in app.py
-# import subprocess # No longer used directly in app.py
 import sys
 import traceback
 from pathlib import Path
-from typing import List, Set, Dict, Optional, Tuple
+from typing import List, Set, Dict, Optional
 import atexit
-import ast
-import re
 
 # readline is not available on all platforms (e.g., standard Windows cmd)
 try:
@@ -30,10 +26,10 @@ from tinycoder.llms import create_llm_client
 from tinycoder.prompt_builder import PromptBuilder
 from tinycoder.repo_map import RepoMap
 from tinycoder.rule_manager import RuleManager
-from tinycoder.shell_executor import ShellExecutor # Added import
-from tinycoder.input_preprocessor import InputPreprocessor # New import
+from tinycoder.shell_executor import ShellExecutor
+from tinycoder.input_preprocessor import InputPreprocessor
 from tinycoder.ui.console_interface import ring_bell
-from tinycoder.ui.command_completer import CommandCompleter, READLINE_AVAILABLE as COMPLETION_READLINE_AVAILABLE # Import renamed to avoid clash
+from tinycoder.ui.command_completer import CommandCompleter, READLINE_AVAILABLE as COMPLETION_READLINE_AVAILABLE
 from tinycoder.ui.log_formatter import ColorLogFormatter, STYLES, COLORS as FmtColors, RESET
 from tinycoder.ui.spinner import Spinner
 
