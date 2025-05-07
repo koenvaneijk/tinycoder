@@ -1,8 +1,8 @@
 import logging
 import os
 import platform
-import shlex
-import subprocess
+# import shlex # No longer used directly in app.py
+# import subprocess # No longer used directly in app.py
 import sys
 import traceback
 from pathlib import Path
@@ -30,6 +30,7 @@ from tinycoder.llms import create_llm_client
 from tinycoder.prompt_builder import PromptBuilder
 from tinycoder.repo_map import RepoMap
 from tinycoder.rule_manager import RuleManager
+from tinycoder.shell_executor import ShellExecutor # Added import
 from tinycoder.ui.console_interface import ring_bell
 from tinycoder.ui.command_completer import CommandCompleter, READLINE_AVAILABLE as COMPLETION_READLINE_AVAILABLE # Import renamed to avoid clash
 from tinycoder.ui.log_formatter import ColorLogFormatter, STYLES, COLORS as FmtColors, RESET
@@ -328,9 +329,15 @@ class App:
             git_manager=self.git_manager,
             input_func=input, # Use built-in input for confirmations within applier
         )
+        # Initialize ShellExecutor
+        self.shell_executor = ShellExecutor(
+            logger=self.logger,
+            history_manager=self.history_manager,
+            git_root=self.git_root
+        )
         # Determine primary input function for main loop
         self.input_func = self._get_input_function()
-        self.logger.debug("App components (Parser, Applier, Input Func) initialized.")
+        self.logger.debug("App components (Parser, Applier, ShellExecutor, Input Func) initialized.")
 
     def _log_final_status(self) -> None:
         """Logs the final Git integration status after all setup."""
@@ -1041,80 +1048,12 @@ class App:
                     return True  # Command handled, stop further processing for this input cycle
 
             elif user_message.startswith("!"):
-                cmd_str = user_message[1:].strip()
-                if not cmd_str:
-                    self.logger.error("Usage: !<shell_command>")
-                    return True  # Continue main loop, don't process further
-
-                self.logger.info(f"Executing command: {cmd_str}")
-                try:
-                    # Use shlex.split for safer argument handling
-                    cmd_args = shlex.split(cmd_str)
-                    # Determine working directory
-                    cwd = Path(self.git_root) if self.git_root else Path.cwd()
-                    # Execute the command
-                    result = subprocess.run(
-                        cmd_args,
-                        capture_output=True,
-                        text=True,
-                        check=False,  # Don't raise exception on non-zero exit code
-                        cwd=cwd,
-                    )
-
-                    # --- START MODIFICATION ---
-
-                    # 1. Capture combined output
-                    command_output_parts = []
-                    stdout_content = result.stdout.strip() if result.stdout else ""
-                    stderr_content = result.stderr.strip() if result.stderr else ""
-
-                    if stdout_content:
-                        command_output_parts.append(f"--- stdout ---\n{stdout_content}")
-                    if stderr_content:
-                        command_output_parts.append(f"--- stderr ---\n{stderr_content}")
-
-                    combined_output = "\n".join(command_output_parts)
-                    full_output_for_history = (
-                        f"Output of command: `{cmd_str}`\n{combined_output}"
-                    )
-
-                    # Print output/error to console (as before)
-                    print("--- Command Output ---")
-                    if stdout_content:
-                        print(stdout_content)  # Use plain print for console
-                    if stderr_content:
-                        self.logger.error(
-                            f"stderr:\n{stderr_content}"
-                        )  # Use helper for color
-                    if result.returncode != 0:
-                        self.logger.warning(
-                            f"Command exited with code {result.returncode}"
-                        )
-                    print("--- End Command Output ---")
-
-                    # 2. Prompt the user (only if there was output)
-                    if (
-                        combined_output and not non_interactive
-                    ):  # Only ask in interactive mode
-                        add_to_context = input(
-                            "Add command output to chat context? (y/N): "
-                        )
-                        # 3. Conditionally add to history
-                        if add_to_context.lower() == "y":
-                            self.history_manager.add_message(
-                                "tool", full_output_for_history
-                            )
-                            self.logger.info("Command output added to chat context.")
-
-                    # --- END MODIFICATION ---
-
-                except FileNotFoundError:
-                    self.logger.error(f"Command not found: {cmd_args[0]}")
-                except Exception as e:
-                    self.logger.error(f"Error executing command: {e}")
-
-                return True  # Command handled, stop further processing for this input cycle
-
+                # Delegate to ShellExecutor
+                if self.shell_executor.execute(user_message, non_interactive):
+                    return True # Command handled by ShellExecutor, stop further processing
+                # If execute returned False (though current design is always True),
+                # it would mean it wasn't a shell command or some other unhandled case.
+                # For now, assume execute always returns True.
             else:
                 message = self.preproc_user_input(user_message)
                 if (
