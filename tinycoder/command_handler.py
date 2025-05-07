@@ -170,9 +170,22 @@ class CommandHandler:
             if not current_fnames:
                 self.logger.info("No files are currently added to the chat.")
             else:
-                self.logger.info("Files in chat:")
-                for fname in sorted(current_fnames):
-                    self.logger.info(f"- {fname}")
+                self.logger.info("Files in chat (estimated tokens):")
+                for fname_rel in sorted(current_fnames):
+                    abs_path = self.file_manager.get_abs_path(fname_rel)
+                    if abs_path and abs_path.exists() and abs_path.is_file():
+                        content = self.file_manager.read_file(abs_path)
+                        if content is not None:
+                            tokens = int(len(content) / 4)
+                            self.logger.info(f"- {fname_rel} ({tokens} tokens)")
+                        else:
+                            self.logger.info(f"- {fname_rel} (Error reading file)")
+                    elif abs_path and abs_path.exists() and not abs_path.is_file():
+                        self.logger.info(f"- {fname_rel} (Not a file)")
+                    else:
+                        # This case might occur if a file was added then deleted from disk,
+                        # or was a placeholder for a new file not yet created by CodeApplier
+                        self.logger.info(f"- {fname_rel} (File not found or not yet created)")
             return True, None
 
         elif command == "/rules":
