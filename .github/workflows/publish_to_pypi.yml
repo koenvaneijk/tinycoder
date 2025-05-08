@@ -56,19 +56,19 @@ jobs:
           - os: ubuntu-latest
             asset_os_arch: linux-x86_64
             pyinstaller_target_arch: null
-            python_version: '3.9'
+            python_version: '3.12'
           - os: macos-13 # Intel Macs
             asset_os_arch: macos-x86_64
             pyinstaller_target_arch: x86_64
-            python_version: '3.9'
+            python_version: '3.12'
           - os: macos-14 # Apple Silicon Macs
             asset_os_arch: macos-arm64
             pyinstaller_target_arch: arm64
-            python_version: '3.9'
+            python_version: '3.12'
           - os: windows-latest
             asset_os_arch: windows-x86_64
             pyinstaller_target_arch: null
-            python_version: '3.9'
+            python_version: '3.12'
 
     steps:
     - uses: actions/checkout@v4
@@ -81,9 +81,18 @@ jobs:
 
     - name: Get clean tag version
       id: get_version
+      # Use PowerShell for Windows, bash for others
+      shell: ${{ runner.os == 'Windows' && 'pwsh' || 'bash' }}
       run: |
-        TAG_VERSION=${{ github.ref_name }}
-        echo "version=${TAG_VERSION#v}" >> $GITHUB_OUTPUT
+        $TAG_WITH_V = "${{ github.ref_name }}"
+        if ($IsWindows) { # PowerShell specific syntax
+          $CLEAN_VERSION = $TAG_WITH_V.TrimStart("v")
+          echo "version=$CLEAN_VERSION" >> $env:GITHUB_OUTPUT
+        } else { # Bash specific syntax
+          CLEAN_VERSION="${TAG_WITH_V#v}"
+          echo "version=$CLEAN_VERSION" >> $GITHUB_OUTPUT
+        }
+        echo "Cleaned version: $CLEAN_VERSION" # For logging
 
     - name: Install dependencies
       run: |
@@ -92,14 +101,32 @@ jobs:
         pip install . # Install your package and its dependencies
 
     - name: Build tinycoder executable with PyInstaller
+      shell: ${{ runner.os == 'Windows' && 'pwsh' || 'bash' }} # Explicit shell
       run: |
-        PYINSTALLER_ARGS="--onefile"
-        if [[ "${{ matrix.pyinstaller_target_arch }}" != "null" && "${{ runner.os }}" == "macOS" ]]; then
-          PYINSTALLER_ARGS="$PYINSTALLER_ARGS --target-arch ${{ matrix.pyinstaller_target_arch }}"
-        fi
-        # Ensure run_tinycoder.py is found (should be as checkout is at root)
-        pyinstaller $PYINSTALLER_ARGS --name "tinycoder-${{ steps.get_version.outputs.version }}-${{ matrix.asset_os_arch }}" run_tinycoder.py
+        $ErrorActionPreference = "Stop" # PowerShell: make script exit on error
 
+        $TARGET_VERSION = "${{ steps.get_version.outputs.version }}"
+        $TARGET_OS_ARCH = "${{ matrix.asset_os_arch }}"
+        $LAUNCHER_SCRIPT = "run_tinycoder.py" # Assuming it's at the root
+
+        if ($IsWindows) {
+          # PowerShell syntax
+          $PYINSTALLER_BASE_ARGS = "--onefile"
+          # For Windows, --target-arch is not typically used with PyInstaller; it builds for the runner's arch.
+          # If matrix.pyinstaller_target_arch had a Windows-specific value, you'd handle it here.
+          $EXECUTABLE_NAME = "tinycoder-$TARGET_VERSION-$TARGET_OS_ARCH" # .exe will be added by PyInstaller
+          pyinstaller $PYINSTALLER_BASE_ARGS --name $EXECUTABLE_NAME $LAUNCHER_SCRIPT
+        } else {
+          # Bash syntax
+          PYINSTALLER_BASE_ARGS="--onefile"
+          PYINSTALLER_FULL_ARGS="$PYINSTALLER_BASE_ARGS"
+          if [[ "${{ matrix.pyinstaller_target_arch }}" != "null" && "${{ runner.os }}" == "macOS" ]]; then
+            PYINSTALLER_FULL_ARGS="$PYINSTALLER_BASE_ARGS --target-arch ${{ matrix.pyinstaller_target_arch }}"
+          fi
+          EXECUTABLE_NAME="tinycoder-$TARGET_VERSION-$TARGET_OS_ARCH"
+          pyinstaller $PYINSTALLER_FULL_ARGS --name "$EXECUTABLE_NAME" $LAUNCHER_SCRIPT
+        }
+        
     - name: Prepare asset name and path
       id: prep_asset
       shell: bash
