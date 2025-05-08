@@ -936,29 +936,56 @@ class EditorApplication:
 
 
 def main_curses_wrapper(stdscr: 'curses._CursesWindow', filepath: Optional[str]) -> None:
-    """Wraps the main application logic for curses."""
+    """
+    The core curses application logic. This function is called BY curses.wrapper.
+    Assumes curses is initialized. The calling wrapper should handle locale.
+    """
     app = EditorApplication(stdscr, filepath)
     app.run()
 
-if __name__ == "__main__":
-    # It's good practice to set locale for curses to handle unicode correctly
+def launch_editor_cli(filepath: Optional[str]) -> None:
+    """
+    Entry point for launching the editor from an external Python script (like tinycoder).
+    Handles locale setup before invoking curses.wrapper.
+    """
+    original_lc_all_tuple = locale.getlocale(locale.LC_ALL) # Get current locale setting
+
     try:
+        # Set locale to the user's preference. Essential for curses to handle
+        # character encoding correctly, especially for input and display of non-ASCII.
         locale.setlocale(locale.LC_ALL, '')
     except locale.Error:
-        pass # Silently ignore if locale cannot be set
-
-    # Allow passing a filename as a command-line argument
-    initial_filepath: Optional[str] = None
-    if len(os.sys.argv) > 1:
-        initial_filepath = os.sys.argv[1]
-    else:
-        # If no file specified, could default to this source file for demo
-        initial_filepath = __file__ 
+        # If locale cannot be set, print a warning to stderr (since logger might not be available here)
+        # The editor might still work for ASCII characters.
+        print("Warning: Could not set system locale for the editor. Unicode characters may not display/input correctly.", file=os.sys.stderr)
+        pass 
 
     try:
-        curses.wrapper(main_curses_wrapper, initial_filepath)
+        curses.wrapper(main_curses_wrapper, filepath)
+    finally:
+        # Restore original locale if it was successfully retrieved.
+        # This is important so that tinycoder (or other calling environments)
+        # continues to operate with its expected locale settings.
+        if original_lc_all_tuple != (None, None): # Ensure we have a valid original locale to restore
+            try:
+                locale.setlocale(locale.LC_ALL, original_lc_all_tuple)
+            except locale.Error:
+                print("Warning: Could not restore original system locale after editor session.", file=os.sys.stderr)
+                pass
+
+if __name__ == "__main__":
+    # This block is for running editor.py directly as a script
+    _initial_filepath: Optional[str] = None
+    if len(os.sys.argv) > 1:
+        _initial_filepath = os.sys.argv[1]
+    else:
+        # If no file specified, could default to this source file for demo
+        _initial_filepath = __file__ 
+
+    try:
+        launch_editor_cli(_initial_filepath) # Use the new entry point
     except Exception as e:
         # This print is outside curses, so it should be visible
-        print("An error occurred outside the editor UI:")
+        print("An error occurred running the editor standalone:")
         print(f"{type(e).__name__}: {e}")
         traceback.print_exc()

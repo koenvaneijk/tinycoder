@@ -3,6 +3,7 @@ import logging
 from typing import TYPE_CHECKING, Callable, Optional, Tuple
 
 from tinycoder.test_runner import run_tests
+from tinycoder.editor import launch_editor_cli
 
 if TYPE_CHECKING:
     from tinycoder.file_manager import FileManager
@@ -230,6 +231,37 @@ class CommandHandler:
                 self.logger.error(f"Invalid argument for /repomap: '{args_str}'. Use 'on', 'off', or 'show'.")
             return True, None
 
+        elif command == "/edit":
+            filenames = re.findall(r"\"(.+?)\"|(\S+)", args_str)
+            filenames = [name for sublist in filenames for name in sublist if name]
+
+            if not filenames or len(filenames) > 1:
+                self.logger.error('Usage: /edit <filename_or_path>')
+                self.logger.info('Example: /edit "my file.py"  OR  /edit path/to/file.txt')
+                return True, None
+            
+            fname_to_edit = filenames[0]
+            abs_path = self.file_manager.get_abs_path(fname_to_edit)
+
+            if not abs_path:
+                # get_abs_path logs an error if path is invalid or outside scope
+                return True, None
+
+            self.logger.info(f"Starting built-in editor for {abs_path}...")
+            try:
+                launch_editor_cli(str(abs_path))
+                self.logger.info(f"Editor session for {abs_path} finished.")
+                self.write_history_func("tool", f"Finished editing {fname_to_edit} using built-in editor.")
+                # Optional: If file was modified and in context, you might want to indicate it
+                # or prompt user to re-add for LLM to see changes immediately.
+                # For now, user can manually re-add or mention file.
+            except Exception as e:
+                self.logger.error(f"The built-in editor encountered an error for {abs_path}: {e}")
+                # For more detailed debugging, consider logging traceback if needed:
+                # import traceback
+                # self.logger.debug(traceback.format_exc())
+            return True, None
+
         elif command == "/help":
             help_text = f"""Available commands:
   /add <file1> ["file 2"]...  Add file(s) to the chat context.
@@ -242,6 +274,7 @@ class CommandHandler:
   /undo                       Undo the last commit made by {self.app_name}.
   /ask                        Switch to ASK mode (answer questions, no edits).
   /code                       Switch to CODE mode (make edits).
+  /edit <filename>            Open the specified file in a built-in text editor.
   /tests                      Run unit tests found in the ./tests directory.
   /rules list                 List available built-in and custom rules and their status for this project.
   /rules enable <rule_name>   Enable a rule for this project.
