@@ -1,13 +1,16 @@
-name: Publish Python Package to PyPI
+name: Build, Test, Publish to PyPI, and Create Release Binaries
 
 on:
   release:
-    types: [published] # Triggers when a new GitHub Release is published
+    types: [published]
+
+permissions:
+  contents: write # Needed to write release assets
 
 jobs:
-  deploy:
+  publish-to-pypi:
     runs-on: ubuntu-latest
-
+    if: github.event_name == 'release' && github.event.action == 'published'
     steps:
     - uses: actions/checkout@v4
       with:
@@ -16,7 +19,7 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.x'
+        python-version: '3.12' # Or your preferred version
 
     - name: Install dependencies
       run: |
@@ -42,3 +45,88 @@ jobs:
       with:
         user: __token__
         password: ${{ secrets.PYPI_API_TOKEN }}
+
+  build-executables:
+    needs: publish-to-pypi # Optional: make this dependent on PyPI publish success
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset_os_arch: linux-x86_64
+            pyinstaller_target_arch: null
+            python_version: '3.9'
+          - os: macos-13 # Intel Macs
+            asset_os_arch: macos-x86_64
+            pyinstaller_target_arch: x86_64
+            python_version: '3.9'
+          - os: macos-14 # Apple Silicon Macs
+            asset_os_arch: macos-arm64
+            pyinstaller_target_arch: arm64
+            python_version: '3.9'
+          - os: windows-latest
+            asset_os_arch: windows-x86_64
+            pyinstaller_target_arch: null
+            python_version: '3.9'
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python_version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python_version }}
+        architecture: ${{ matrix.pyinstaller_target_arch || 'x64' }}
+
+    - name: Get clean tag version
+      id: get_version
+      run: |
+        TAG_VERSION=${{ github.ref_name }}
+        echo "version=${TAG_VERSION#v}" >> $GITHUB_OUTPUT
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pyinstaller
+        pip install . # Install your package and its dependencies
+
+    - name: Build tinycoder executable with PyInstaller
+      run: |
+        PYINSTALLER_ARGS="--onefile"
+        if [[ "${{ matrix.pyinstaller_target_arch }}" != "null" && "${{ runner.os }}" == "macOS" ]]; then
+          PYINSTALLER_ARGS="$PYINSTALLER_ARGS --target-arch ${{ matrix.pyinstaller_target_arch }}"
+        fi
+        # Ensure run_tinycoder.py is found (should be as checkout is at root)
+        pyinstaller $PYINSTALLER_ARGS --name "tinycoder-${{ steps.get_version.outputs.version }}-${{ matrix.asset_os_arch }}" run_tinycoder.py
+
+    - name: Prepare asset name and path
+      id: prep_asset
+      shell: bash
+      run: |
+        VERSION="${{ steps.get_version.outputs.version }}"
+        OS_ARCH="${{ matrix.asset_os_arch }}"
+        
+        ASSET_NAME_TINYCODER="tinycoder-${VERSION}-${OS_ARCH}"
+        ASSET_PATH_TINYCODER_BASE="dist/${ASSET_NAME_TINYCODER}" # Base path without .exe
+
+        if [[ "${{ runner.os }}" == "Windows" ]]; then
+          echo "ASSET_PATH_TINYCODER=${ASSET_PATH_TINYCODER_BASE}.exe" >> $GITHUB_ENV
+          echo "ASSET_NAME_TINYCODER=${ASSET_NAME_TINYCODER}.exe" >> $GITHUB_ENV
+        else
+          echo "ASSET_PATH_TINYCODER=${ASSET_PATH_TINYCODER_BASE}" >> $GITHUB_ENV
+          echo "ASSET_NAME_TINYCODER=${ASSET_NAME_TINYCODER}" >> $GITHUB_ENV
+        fi
+        
+        echo "Listing dist directory:"
+        ls -R dist/
+
+    - name: Upload tinycoder Release Asset
+      uses: svenstaro/upload-release-action@v2
+      with:
+        repo_token: ${{ secrets.GITHUB_TOKEN }}
+        file: ${{ env.ASSET_PATH_TINYCODER }}
+        asset_name: ${{ env.ASSET_NAME_TINYCODER }}
+        tag: ${{ github.ref }}
+        overwrite: true
+        body: "TinyCoder executable for ${{ matrix.asset_os_arch }}"
