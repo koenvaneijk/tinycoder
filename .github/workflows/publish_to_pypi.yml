@@ -93,41 +93,38 @@ jobs:
         python -m pip install --upgrade pip
         pip install pyinstaller
         pip install . # Install your package and its dependencies
-
+        
     - name: Build tinycoder executable with PyInstaller
       shell: bash
-      run: |
-        set -e # Exit immediately if a command exits with a non-zero status.
+      run: | 
+        set -e
 
+        # Get version from previous step
         TARGET_VERSION="${{ steps.get_version.outputs.version }}"
-        # From matrix: os_name, arch_name, pyinstaller_target_arch
-        # From runner context: runner.os (available within the 'run' script)
 
-        PYINSTALLER_OS_NAME="${{ matrix.os_name }}"
-        PYINSTALLER_ARCH_NAME="${{ matrix.arch_name }}"
-        PYINSTALLER_TARGET_ARCH_MATRIX_VALUE="${{ matrix.pyinstaller_target_arch }}" # Could be null
+        # Get values from matrix
+        PYINSTALLER_OS_NAME_MATRIX="${{ matrix.os_name }}"
+        PYINSTALLER_ARCH_NAME_MATRIX="${{ matrix.arch_name }}"
+        PYINSTALLER_TARGET_ARCH_MATRIX_VALUE="${{ matrix.pyinstaller_target_arch }}"
 
-        # Let PyInstaller name the output file in dist/ simply 'tinycoder'
-        # PyInstaller handles adding .exe on Windows automatically.
-        PYINSTALLER_OUTPUT_NAME="tinycoder"
+        PYINSTALLER_INTERNAL_OUTPUT_NAME="tinycoder"
 
         PYINSTALLER_BASE_ARGS="--onefile"
-        PYINSTALLER_FULL_ARGS="$PYINSTALLER_BASE_ARGS" # Start with base args
+        PYINSTALLER_FULL_ARGS="$PYINSTALLER_BASE_ARGS"
 
-        # Add --target-arch for macOS if specified in matrix
         if [[ "$RUNNER_OS" == "macOS" && "$PYINSTALLER_TARGET_ARCH_MATRIX_VALUE" != "null" && "$PYINSTALLER_TARGET_ARCH_MATRIX_VALUE" != "" ]]; then
           PYINSTALLER_FULL_ARGS="$PYINSTALLER_FULL_ARGS --target-arch $PYINSTALLER_TARGET_ARCH_MATRIX_VALUE"
         fi
         
         echo "Runner OS: $RUNNER_OS"
-        echo "PyInstaller OS Name (from matrix): $PYINSTALLER_OS_NAME"
-        echo "PyInstaller Arch Name (from matrix): $PYINSTALLER_ARCH_NAME"
-        echo "PyInstaller Target Arch (from matrix): $PYINSTALLER_TARGET_ARCH_MATRIX_VALUE"
+        echo "PyInstaller OS Name (from matrix): $PYINSTALLER_OS_NAME_MATRIX"
+        echo "PyInstaller Arch Name (from matrix): $PYINSTALLER_ARCH_NAME_MATRIX"
+        echo "PyInstaller Target Arch for --target-arch (from matrix): $PYINSTALLER_TARGET_ARCH_MATRIX_VALUE"
         echo "PyInstaller final args: $PYINSTALLER_FULL_ARGS"
-        echo "PyInstaller output name: $PYINSTALLER_OUTPUT_NAME"
+        echo "PyInstaller internal output name (for --name): $PYINSTALLER_INTERNAL_OUTPUT_NAME"
 
-        pyinstaller $PYINSTALLER_FULL_ARGS --name "$PYINSTALLER_OUTPUT_NAME" run_tinycoder.py}
-        
+        pyinstaller $PYINSTALLER_FULL_ARGS --name "$PYINSTALLER_INTERNAL_OUTPUT_NAME" run_tinycoder.py # Corrected line
+
     - name: Prepare asset name and path
       id: prep_asset
       shell: bash
