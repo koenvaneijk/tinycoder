@@ -1,0 +1,43 @@
+name: Publish Python Package to PyPI
+
+on:
+  release:
+    types: [published] # Triggers when a new GitHub Release is published
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.x'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install build twine
+
+    - name: Verify tag matches setup.py version (Optional but Recommended)
+      run: |
+        PACKAGE_VERSION=$(python setup.py --version)
+        TAG_VERSION=${{ github.ref_name }}
+        TAG_VERSION_CLEANED=${TAG_VERSION#v}
+        if [ "$PACKAGE_VERSION" != "$TAG_VERSION_CLEANED" ]; then
+          echo "Error: setup.py version ($PACKAGE_VERSION) does not match Git tag ($TAG_VERSION_CLEANED)."
+          exit 1
+        fi
+        echo "Version check passed: $PACKAGE_VERSION"
+
+    - name: Build package
+      run: python -m build
+
+    - name: Publish package to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        user: __token__
+        password: ${{ secrets.PYPI_API_TOKEN }}

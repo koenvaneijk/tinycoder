@@ -4,7 +4,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.8+-blue.svg" alt="Python Version">
-  <img src="https://img.shields.io/badge/license-AGPLv2-green.svg" alt="License"> <!-- Assuming MIT, change if needed -->
+  <img src="https://img.shields.io/badge/license-AGPLv3-green.svg" alt="License">
   <img src="https://img.shields.io/github/last-commit/koenvaneijk/tinycoder" alt="Last Commit">
 </p>
 
@@ -158,7 +158,7 @@ Contributions are welcome! Please read the `CONTRIBUTING.md` file (if it exists)
 
 ## 📜 License
 
-This project is licensed under the AGPLv2 License. If you need a different license, please contact me at vaneijk.koen@gmail.com.
+This project is licensed under the AGPLv3+ License. If you need a different license, please contact me at vaneijk.koen@gmail.com.
 
 ---
 
