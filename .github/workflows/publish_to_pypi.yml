@@ -81,18 +81,12 @@ jobs:
 
     - name: Get clean tag version
       id: get_version
-      # Use PowerShell for Windows, bash for others
-      shell: ${{ runner.os == 'Windows' && 'pwsh' || 'bash' }}
+      shell: bash
       run: |
-        $TAG_WITH_V = "${{ github.ref_name }}"
-        if ($IsWindows) { # PowerShell specific syntax
-          $CLEAN_VERSION = $TAG_WITH_V.TrimStart("v")
-          echo "version=$CLEAN_VERSION" >> $env:GITHUB_OUTPUT
-        } else { # Bash specific syntax
-          CLEAN_VERSION="${TAG_WITH_V#v}"
-          echo "version=$CLEAN_VERSION" >> $GITHUB_OUTPUT
-        }
-        echo "Cleaned version: $CLEAN_VERSION" # For logging
+        TAG_WITH_V="${{ github.ref_name }}"
+        CLEAN_VERSION="${TAG_WITH_V#v}"
+        echo "version=$CLEAN_VERSION" >> "$GITHUB_OUTPUT" # Use $GITHUB_OUTPUT consistently
+        echo "Cleaned version: $CLEAN_VERSION"
 
     - name: Install dependencies
       run: |
@@ -101,31 +95,38 @@ jobs:
         pip install . # Install your package and its dependencies
 
     - name: Build tinycoder executable with PyInstaller
-      shell: ${{ runner.os == 'Windows' && 'pwsh' || 'bash' }} # Explicit shell
+      shell: bash
       run: |
-        $ErrorActionPreference = "Stop" # PowerShell: make script exit on error
+        set -e # Exit immediately if a command exits with a non-zero status.
 
-        $TARGET_VERSION = "${{ steps.get_version.outputs.version }}"
-        $TARGET_OS_ARCH = "${{ matrix.asset_os_arch }}"
-        $LAUNCHER_SCRIPT = "run_tinycoder.py" # Assuming it's at the root
+        TARGET_VERSION="${{ steps.get_version.outputs.version }}"
+        # From matrix: os_name, arch_name, pyinstaller_target_arch
+        # From runner context: runner.os (available within the 'run' script)
 
-        if ($IsWindows) {
-          # PowerShell syntax
-          $PYINSTALLER_BASE_ARGS = "--onefile"
-          # For Windows, --target-arch is not typically used with PyInstaller; it builds for the runner's arch.
-          # If matrix.pyinstaller_target_arch had a Windows-specific value, you'd handle it here.
-          $EXECUTABLE_NAME = "tinycoder-$TARGET_VERSION-$TARGET_OS_ARCH" # .exe will be added by PyInstaller
-          pyinstaller $PYINSTALLER_BASE_ARGS --name $EXECUTABLE_NAME $LAUNCHER_SCRIPT
-        } else {
-          # Bash syntax
-          PYINSTALLER_BASE_ARGS="--onefile"
-          PYINSTALLER_FULL_ARGS="$PYINSTALLER_BASE_ARGS"
-          if [[ "${{ matrix.pyinstaller_target_arch }}" != "null" && "${{ runner.os }}" == "macOS" ]]; then
-            PYINSTALLER_FULL_ARGS="$PYINSTALLER_BASE_ARGS --target-arch ${{ matrix.pyinstaller_target_arch }}"
-          fi
-          EXECUTABLE_NAME="tinycoder-$TARGET_VERSION-$TARGET_OS_ARCH"
-          pyinstaller $PYINSTALLER_FULL_ARGS --name "$EXECUTABLE_NAME" $LAUNCHER_SCRIPT
-        }
+        PYINSTALLER_OS_NAME="${{ matrix.os_name }}"
+        PYINSTALLER_ARCH_NAME="${{ matrix.arch_name }}"
+        PYINSTALLER_TARGET_ARCH_MATRIX_VALUE="${{ matrix.pyinstaller_target_arch }}" # Could be null
+
+        # Let PyInstaller name the output file in dist/ simply 'tinycoder'
+        # PyInstaller handles adding .exe on Windows automatically.
+        PYINSTALLER_OUTPUT_NAME="tinycoder"
+
+        PYINSTALLER_BASE_ARGS="--onefile"
+        PYINSTALLER_FULL_ARGS="$PYINSTALLER_BASE_ARGS" # Start with base args
+
+        # Add --target-arch for macOS if specified in matrix
+        if [[ "$RUNNER_OS" == "macOS" && "$PYINSTALLER_TARGET_ARCH_MATRIX_VALUE" != "null" && "$PYINSTALLER_TARGET_ARCH_MATRIX_VALUE" != "" ]]; then
+          PYINSTALLER_FULL_ARGS="$PYINSTALLER_FULL_ARGS --target-arch $PYINSTALLER_TARGET_ARCH_MATRIX_VALUE"
+        fi
+        
+        echo "Runner OS: $RUNNER_OS"
+        echo "PyInstaller OS Name (from matrix): $PYINSTALLER_OS_NAME"
+        echo "PyInstaller Arch Name (from matrix): $PYINSTALLER_ARCH_NAME"
+        echo "PyInstaller Target Arch (from matrix): $PYINSTALLER_TARGET_ARCH_MATRIX_VALUE"
+        echo "PyInstaller final args: $PYINSTALLER_FULL_ARGS"
+        echo "PyInstaller output name: $PYINSTALLER_OUTPUT_NAME"
+
+        pyinstaller $PYINSTALLER_FULL_ARGS --name "$PYINSTALLER_OUTPUT_NAME" run_tinycoder.py}
         
     - name: Prepare asset name and path
       id: prep_asset
