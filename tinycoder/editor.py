@@ -907,6 +907,10 @@ class EditorApplication:
         """Basic curses configurations."""
         curses.curs_set(1)  # Show cursor
         self.stdscr.nodelay(False)  # Blocking input
+        # Enter raw mode to handle Ctrl+S, Ctrl+Q, Ctrl+C etc. directly
+        # curses.wrapper puts terminal in cbreak mode, raw() is more fundamental.
+        curses.raw()
+        self.stdscr.keypad(True) # Ensure special keys like arrows are processed
         curses.mousemask(curses.ALL_MOUSE_EVENTS | curses.REPORT_MOUSE_POSITION)
         # `start_color` and `use_default_colors` are called in ColorManager
 
@@ -928,8 +932,11 @@ class EditorApplication:
                 key = self.stdscr.getch()
             except curses.error: # Interrupted system call (e.g. window resize)
                 continue 
-            except KeyboardInterrupt: # Treat Ctrl+C as Ctrl+Q for quit
-                key = 17 # Simulate Ctrl+Q
+            except KeyboardInterrupt: # Fallback, less likely for Ctrl+C in raw mode
+                key = 17 # Simulate Ctrl+Q (DC1)
+            
+            if key == 3: # In raw mode, Ctrl+C often sends ETX (ASCII 3)
+                key = 17 # Map to our standard Ctrl+Q keycode
 
             if self.input_handler.process_key(self.stdscr, key):
                 break # Exit loop if process_key signals to quit
@@ -948,30 +955,35 @@ def launch_editor_cli(filepath: Optional[str]) -> None:
     Entry point for launching the editor from an external Python script (like tinycoder).
     Handles locale setup before invoking curses.wrapper.
     """
-    original_lc_all_tuple = locale.getlocale(locale.LC_ALL) # Get current locale setting
+    original_lc_all_tuple: Tuple[Optional[str], Optional[str]] = locale.getlocale(locale.LC_ALL)
 
     try:
         # Set locale to the user's preference. Essential for curses to handle
         # character encoding correctly, especially for input and display of non-ASCII.
         locale.setlocale(locale.LC_ALL, '')
     except locale.Error:
-        # If locale cannot be set, print a warning to stderr (since logger might not be available here)
-        # The editor might still work for ASCII characters.
+        # If locale cannot be set, print a warning to stderr
         print("Warning: Could not set system locale for the editor. Unicode characters may not display/input correctly.", file=os.sys.stderr)
-        pass 
+    except Exception as e:
+        # Catch any other unexpected error during locale setup
+        print(f"Warning: An unexpected error ({type(e).__name__}) occurred while setting locale for the editor: {e}", file=os.sys.stderr)
 
     try:
         curses.wrapper(main_curses_wrapper, filepath)
     finally:
-        # Restore original locale if it was successfully retrieved.
-        # This is important so that tinycoder (or other calling environments)
-        # continues to operate with its expected locale settings.
-        if original_lc_all_tuple != (None, None): # Ensure we have a valid original locale to restore
+        # Restore original locale.
+        # Only attempt if both parts of the original locale tuple were non-None.
+        # locale.setlocale(LC_ALL, (None, None)) or similar can cause errors.
+        if original_lc_all_tuple[0] is not None and original_lc_all_tuple[1] is not None:
             try:
                 locale.setlocale(locale.LC_ALL, original_lc_all_tuple)
             except locale.Error:
                 print("Warning: Could not restore original system locale after editor session.", file=os.sys.stderr)
-                pass
+            except Exception as e:
+                print(f"Warning: An unexpected error ({type(e).__name__}) occurred while restoring locale: {e}", file=os.sys.stderr)
+        # If the original locale had None components, we don't attempt to restore it,
+        # leaving the locale as what `setlocale(LC_ALL, '')` configured.
+        # This is generally safer.
 
 if __name__ == "__main__":
     # This block is for running editor.py directly as a script
