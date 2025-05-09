@@ -130,18 +130,20 @@ tinycoder --code "Implement the function foo in service.py using utils.bar"
 
 **Quick Command Reference:**
 
-*   `/add <file> ["file 2"]...`: Add file(s) to the chat context.
-*   `/drop <file> ["file 2"]...`: Remove file(s) from the chat context.
+*   `/add <file1> ["file 2"]...`: Add file(s) to the chat context.
+*   `/drop <file1> ["file 2"]...`: Remove file(s) from the chat context.
 *   `/files`: List files currently in the chat.
-*   `/ask [question]`: Switch to ASK mode or ask a question directly.
-*   `/code [instruction]`: Switch to CODE mode or give an instruction directly.
+*   `/suggest_files [instruction]`: Ask the LLM to suggest relevant files. Uses last user message if no instruction.
+*   `/edit <filename>`: Open the specified file in a built-in text editor.
+*   `/ask`: Switch to ASK mode (answer questions, no edits).
+*   `/code`: Switch to CODE mode (make edits).
 *   `/commit`: Commit the changes applied by the last successful LLM edit.
 *   `/undo`: Revert the last TinyCoder commit.
 *   `/tests`: Run project tests (e.g., `pytest` in `./tests`).
 *   `/rules list`: List available rules and their status for the project.
 *   `/rules enable <rule_name>`: Enable a specific rule.
 *   `/rules disable <rule_name>`: Disable a specific rule.
-*   `/repomap [on|off]`: Enable or disable including the repository map in prompts.
+*   `/repomap [on|off|show]`: Enable, disable, or show the inclusion of the repository map in prompts.
 *   `/clear`: Clear the chat history.
 *   `/reset`: Clear history and remove all files from context.
 *   `/help`: Show help message.
