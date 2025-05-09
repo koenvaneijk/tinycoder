@@ -44,6 +44,14 @@ TinyCoder is a Python-based tool designed to help you interact with Large Langua
 *   **💾 Chat History:** Persists conversations to `.tinycoder_history` in the user's standard application data directory (`ChatHistoryManager`) and allows resuming with `--continue-chat`.
 *   **⚙️ Command Handling:** Rich set of commands for session control (`CommandHandler`).
 *   **🐚 Shell Execution:** Run shell commands directly using `!<command>`. Output can optionally be added to the chat context.
+*   **📝 Built-in Text Editor:** A simple, integrated text editor (`/edit <filename>`) for quick modifications with features like:
+    *   Syntax highlighting (Python).
+    *   Line numbers and status bar.
+    *   Basic editing: insert, delete, tab, enter with auto-indent.
+    *   Navigation: arrows, Home/End, PageUp/PageDown.
+    *   Find functionality (Ctrl+F, F3 for next).
+    *   File saving (Ctrl+S) and quitting (Ctrl+Q) with unsaved changes confirmation.
+    *   Mouse support for cursor placement.
 
 ---
 
