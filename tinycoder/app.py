@@ -28,7 +28,7 @@ from tinycoder.repo_map import RepoMap
 from tinycoder.rule_manager import RuleManager
 from tinycoder.shell_executor import ShellExecutor
 from tinycoder.input_preprocessor import InputPreprocessor
-from tinycoder.ui.console_interface import ring_bell
+from tinycoder.ui.console_interface import ring_bell, ConsoleInterface
 from tinycoder.ui.command_completer import CommandCompleter, READLINE_AVAILABLE as COMPLETION_READLINE_AVAILABLE
 from tinycoder.ui.log_formatter import ColorLogFormatter, STYLES, COLORS as FmtColors, RESET
 from tinycoder.ui.spinner import Spinner
@@ -50,6 +50,7 @@ class App:
         self._init_prompt_builder()
         self._setup_rules_manager()
         self._init_input_preprocessor() # Initialize InputPreprocessor
+        self._init_console_interface() # Initialize ConsoleInterface
         self._init_app_state()
         self._init_command_handler()
         self._configure_readline()
@@ -208,6 +209,15 @@ class App:
         )
         self.logger.debug("InputPreprocessor initialized.")
 
+    def _init_console_interface(self) -> None:
+        """Initializes the ConsoleInterface."""
+        self.console_interface = ConsoleInterface(
+            logger=self.logger,
+            get_app_mode_func=lambda: self.mode, # Pass a callable to get current mode
+            readline_available=READLINE_AVAILABLE # Pass the app-level constant
+        )
+        self.logger.debug("ConsoleInterface initialized.")
+
     def _init_app_state(self) -> None:
         """Initializes basic application state variables."""
         self.coder_commits: Set[str] = set()
@@ -343,9 +353,9 @@ class App:
             history_manager=self.history_manager,
             git_root=self.git_root
         )
-        # Determine primary input function for main loop
-        self.input_func = self._get_input_function()
-        self.logger.debug("App components (Parser, Applier, ShellExecutor, Input Func) initialized.")
+        # Determine primary input function for main loop using ConsoleInterface
+        self.input_func = self.console_interface.determine_input_function()
+        self.logger.debug("App components (Parser, Applier, ShellExecutor, Input Func from ConsoleInterface) initialized.")
 
     def _log_final_status(self) -> None:
         """Logs the final Git integration status after all setup."""
@@ -464,91 +474,6 @@ class App:
             self.logger.debug(f"Readline history saved to {self.history_file}")
         except Exception as e:
             self.logger.error(f"Failed to save readline history to {self.history_file}: {e}")
-
-    def _get_multiline_input_readline(self):
-        """
-        Gets multi-line input using readline (if available), terminated by Ctrl+D.
-        Handles prompts and Ctrl+C cancellation.
-        """
-        lines = []
-        # Determine the correct instruction based on the OS
-        if platform.system() == "Windows":
-             # Readline might be available via pyreadline3, but Ctrl+Z is more standard there
-            finish_instruction = "(Ctrl+Z then Enter to finish on Windows)"
-        else:
-            finish_instruction = "(Ctrl+D to finish)" # Standard Unix-like
-
-        print(f"Enter text {finish_instruction}:")
-
-        # Mode prefix for the prompt
-        mode_prefix = f"{STYLES['BOLD']}{FmtColors['GREEN']}({self.mode}){RESET} "
-        prompt = f"{mode_prefix}> "
-
-        while True:
-            try:
-                # Use input() to leverage readline's line editing, history, and completion
-                line = input(prompt)
-                lines.append(line)
-                # Change prompt for subsequent lines (optional, but common)
-                # Keep it simple for now
-                # prompt = f"{mode_prefix}.. "
-            except EOFError: # Handle Ctrl+D (or Ctrl+Z+Enter on Windows sometimes)
-                print() # Print a newline for cleaner exit after EOF
-                break
-            except KeyboardInterrupt: # Handle Ctrl+C
-                print("\nInput cancelled (Ctrl+C).")
-                return None # Indicate cancellation
-
-        return "\n".join(lines)
-
-    # This function remains, but its logic is simplified by _get_multiline_input_readline
-    def _get_multiline_input_stdin(self):
-         """Gets multi-line input by reading stdin until EOF (fallback)."""
-         # Determine the correct instruction based on the OS
-         if platform.system() == "Windows":
-             message = "Enter text (Ctrl+Z then Enter to finish):"
-         else:
-             message = "Enter text (Ctrl+D to finish):"
-
-         print(message)
-         # Mode prefix for the prompt - print once before stdin.read()
-         mode_prefix = f"{STYLES['BOLD']}{FmtColors['GREEN']}({self.mode}){RESET} "
-         print(f"{mode_prefix}> ", end="", flush=True)
-         try:
-             user_input = sys.stdin.read()
-             # .read() often includes the final newline if the user pressed Enter
-             # before Ctrl+D/Ctrl+Z. You might want to strip trailing whitespace.
-             return user_input.rstrip()
-         except KeyboardInterrupt:
-             print("\nInput cancelled (Ctrl+C).")
-             return None  # Return None to signal cancellation
-         except Exception as e:
-             print(f"\nAn unexpected error occurred reading stdin: {e}")
-             return None  # Return None on error
-
-    def _get_input_function(self):
-        """Returns the appropriate input function based on readline availability and OS."""
-        if READLINE_AVAILABLE and platform.system() != "Windows":
-            # Use readline-based input on non-Windows where it's generally more reliable
-            self.logger.debug("Using readline-based multi-line input function.")
-            return self._get_multiline_input_readline
-        elif platform.system() == "Windows":
-             # On Windows, default to single-line input() if readline isn't working well,
-             # or potentially use _get_multiline_input_stdin if that's preferred.
-             # Let's stick with standard `input` for simplicity unless readline is confirmed robust.
-             # Check if pyreadline3 might be installed and usable
-             if READLINE_AVAILABLE:
-                 self.logger.debug("Readline detected on Windows, using readline-based multi-line input.")
-                 # Try using the readline function on Windows too, relies on pyreadline3 behaving well
-                 return self._get_multiline_input_readline
-             else:
-                  self.logger.debug("Readline not available on Windows, falling back to single-line input().")
-                  # Fallback to standard input for single lines
-                  return input # Simple single-line input
-        else:
-            # Fallback for non-Windows non-readline scenarios (unlikely)
-            self.logger.debug("Readline not available, falling back to basic multi-line stdin read.")
-            return self._get_multiline_input_stdin
 
     def _send_to_llm(self) -> Optional[str]:
         """Sends the current chat history and file context to the LLM."""
