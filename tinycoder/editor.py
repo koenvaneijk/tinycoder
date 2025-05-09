@@ -955,7 +955,6 @@ def launch_editor_cli(filepath: Optional[str]) -> None:
     Entry point for launching the editor from an external Python script (like tinycoder).
     Handles locale setup before invoking curses.wrapper.
     """
-    original_lc_all_tuple: Tuple[Optional[str], Optional[str]] = locale.getlocale(locale.LC_ALL)
 
     try:
         # Set locale to the user's preference. Essential for curses to handle
@@ -968,23 +967,8 @@ def launch_editor_cli(filepath: Optional[str]) -> None:
         # Catch any other unexpected error during locale setup
         print(f"Warning: An unexpected error ({type(e).__name__}) occurred while setting locale for the editor: {e}", file=os.sys.stderr)
 
-    try:
-        curses.wrapper(main_curses_wrapper, filepath)
-    finally:
-        # Restore original locale.
-        # Only attempt if both parts of the original locale tuple were non-None.
-        # locale.setlocale(LC_ALL, (None, None)) or similar can cause errors.
-        if original_lc_all_tuple[0] is not None and original_lc_all_tuple[1] is not None:
-            try:
-                locale.setlocale(locale.LC_ALL, original_lc_all_tuple)
-            except locale.Error:
-                print("Warning: Could not restore original system locale after editor session.", file=os.sys.stderr)
-            except Exception as e:
-                print(f"Warning: An unexpected error ({type(e).__name__}) occurred while restoring locale: {e}", file=os.sys.stderr)
-        # If the original locale had None components, we don't attempt to restore it,
-        # leaving the locale as what `setlocale(LC_ALL, '')` configured.
-        # This is generally safer.
-
+    curses.wrapper(main_curses_wrapper, filepath)
+    
 if __name__ == "__main__":
     # This block is for running editor.py directly as a script
     _initial_filepath: Optional[str] = None
