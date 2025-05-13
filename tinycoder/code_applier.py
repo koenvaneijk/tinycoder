@@ -7,7 +7,6 @@ if TYPE_CHECKING:
     from tinycoder.file_manager import FileManager
     from tinycoder.git_manager import GitManager
 
-# Linters
 from tinycoder.linters.python_linter import PythonLinter
 from tinycoder.linters.html_linter import HTMLLinter
 from tinycoder.linters.css_validator import CssValidator
@@ -78,20 +77,12 @@ class CodeApplier:
               original or partially modified content if applicable).
         """
         failed_edits_indices: List[int] = []
-        original_file_content: Dict[str, Optional[str]] = (
-            {}
-        )  # Store original content (or None if new)
-        edited_file_content: Dict[str, str] = (
-            {}
-        )  # Stores current content after edits in this run
-        touched_files: Set[str] = set()  # Tracks files mentioned in edits
-        files_created_in_this_run: Set[str] = (
-            set()
-        )  # Tracks files created during this call
+        original_file_content: Dict[str, Optional[str]] = {}
+        edited_file_content: Dict[str, str] = {}
+        touched_files: Set[str] = set()
+        files_created_in_this_run: Set[str] = set()
         lint_errors_found: Dict[str, str] = {}
-        write_failed = (
-            False  # Flag to track if any write operation fails after the loop
-        )
+        write_failed = False
 
         for i, (fname, search_block, replace_block) in enumerate(edits):
             edit_failed_this_iteration = False  # Flag for this specific edit block
@@ -155,7 +146,6 @@ class CodeApplier:
             try:
                 new_content_normalized: Optional[str] = None
 
-                # Handle file creation scenario explicitly (first edit for this file is creation)
                 if is_creation_attempt and rel_path not in files_created_in_this_run:
                     if search_block != "":
                         self.logger.error(
@@ -163,73 +153,57 @@ class CodeApplier:
                         )
                         edit_failed_this_iteration = True
                     else:
-                        # This is a valid creation/prepend-to-empty
                         replace_block_normalized = replace_block.replace("\r\n", "\n")
                         self.logger.info(
                             f"--- Planning to create/overwrite '{rel_path}' ---"
                         )
                         for line in replace_block_normalized.splitlines():
-                            # Print added lines in green
                             self.logger.info(f"{COLORS['GREEN']}+ {line}{RESET}")
                         self.logger.info(f"--- End Plan ---")
-                        # Update cache, mark as created
+                        
                         new_content_normalized = replace_block_normalized
                         edited_file_content[rel_path] = new_content_normalized
                         files_created_in_this_run.add(rel_path)
                         self.logger.info(
                             f"Prepared edit {i+1} for creation of '{rel_path}'"
-                        )  # Indicate memory update
+                        )
 
-                # Handle modification of existing or already-cached content
                 elif not is_creation_attempt or rel_path in files_created_in_this_run:
-                    # Normalize search and replace blocks for this edit
                     search_block_normalized = search_block.replace("\r\n", "\n")
                     replace_block_normalized = replace_block.replace("\r\n", "\n")
 
                     if search_is_empty:
-                        # Prepend replace block
                         new_content_normalized = (
                             replace_block_normalized + current_content_normalized
                         )
                     elif search_block_normalized in current_content_normalized:
-                        # Perform replacement
                         new_content_normalized = current_content_normalized.replace(
                             search_block_normalized, replace_block_normalized, 1
                         )
                     else:
-                        # Search block not found
                         self.logger.error(
                             f"Edit {i+1}: SEARCH block not found exactly in '{rel_path}'. Edit failed."
                         )
                         edit_failed_this_iteration = True
 
-                    # Check if content actually changed with *this specific edit*
                     if (
                         not edit_failed_this_iteration
                         and new_content_normalized is not None
                     ):
                         if new_content_normalized != current_content_normalized:
-                            # Print diff of this specific step
                             self._print_diff(
                                 rel_path,
                                 current_content_normalized,
                                 new_content_normalized,
                             )
-                            # Update cache with the result of this edit
                             edited_file_content[rel_path] = new_content_normalized
                             self.logger.info(
                                 f"Prepared edit {i+1} for '{rel_path}'"
-                            )  # Indicate memory update
+                            )
                         else:
-                            # No change from this specific edit
                             self.logger.info(
                                 f"Edit {i+1} for '{rel_path}' resulted in no changes to current state."
                             )
-                    elif edit_failed_this_iteration:
-                        # Need to ensure cache still holds the content *before* this failed edit
-                        # for potential subsequent edits or final write comparison.
-                        # This should already be the case as edited_file_content wasn't updated.
-                        pass
 
                 # If this edit failed at any point, record its index
                 if edit_failed_this_iteration:
@@ -241,9 +215,7 @@ class CodeApplier:
                 )
                 failed_edits_indices.append(i + 1)
 
-        # --- Write changed files to disk ---
-        modified_files: Set[str] = set()  # Reset and populate based on final comparison
-        # Remove the check `if not failed_edits_indices:` to allow writing successful edits even if others failed.
+        modified_files: Set[str] = set()
         for rel_path in touched_files:
             abs_path = self.file_manager.get_abs_path(rel_path)
             if not abs_path:
@@ -251,9 +223,8 @@ class CodeApplier:
                     f"Cannot resolve path '{rel_path}' for writing final changes."
                 )
                 write_failed = True
-                continue # Skip to next file if path resolution fails
+                continue
 
-            # This block should be outside the 'if not abs_path:' block, but inside the 'for' loop
             final_content = edited_file_content.get(rel_path)
             initial_content = original_file_content.get(rel_path)
             initial_content_normalized = (
@@ -262,19 +233,14 @@ class CodeApplier:
                 else None
             )
 
-            # Determine if a write is needed
             needs_write = False
             if rel_path in files_created_in_this_run:
-                # If marked for creation, always write (unless final content is None?)
-                if (
-                    final_content is not None
-                ):  # Check if creation didn't somehow fail
+                if final_content is not None:
                     needs_write = True
             elif (
                 final_content is not None
                 and final_content != initial_content_normalized
             ):
-                # Existing file modified
                 needs_write = True
 
             if needs_write:
@@ -294,8 +260,6 @@ class CodeApplier:
                     )
                     write_failed = True  # Mark overall failure if any write fails
 
-        # --- Lint modified/created files ---
-        # Lint all files that were *touched* using the final cached content
         for rel_path in touched_files:
             abs_path = self.file_manager.get_abs_path(rel_path)
             if not abs_path:
@@ -306,9 +270,6 @@ class CodeApplier:
 
             content_to_lint = edited_file_content.get(rel_path)
             if content_to_lint is None:
-                # If content is None (e.g., initial read failed and no edits applied), skip linting
-                # Only print error if it was expected to be there (i.e., not None in original_file_content maybe?)
-                # Let's skip silently for now if content isn't available in cache.
                 continue
 
             error_string: Optional[str] = None
@@ -324,16 +285,12 @@ class CodeApplier:
             if error_string:
                 lint_errors_found[rel_path] = error_string
 
-        # Determine overall success and final return value
         all_succeeded = not failed_edits_indices and not write_failed
 
         if failed_edits_indices:
             self.logger.error(
                 f"Failed to apply edit(s): {', '.join(map(str, sorted(failed_edits_indices)))}"
             )
-        # No separate error message for write_failed needed here, as write_file prints its own.
-
-        # Return: all succeeded flag, list of failed indices, set of *successfully modified* files, lint errors
         return all_succeeded, failed_edits_indices, modified_files, lint_errors_found
 
     def _print_diff(
@@ -354,19 +311,18 @@ class CodeApplier:
         Side Effects:
             Prints the diff output directly to the standard output using logger.
         """
-        # Set n=10 to show 10 lines of context before and after changes
         diff = difflib.unified_diff(
             original_content.splitlines(keepends=True),
             new_content.splitlines(keepends=True),
             fromfile=f"{rel_path} (original)",
             tofile=f"{rel_path} (modified)",
-            lineterm="",  # Avoid extra newlines from difflib
-            n=10  # Show 10 lines of context instead of default 3
+            lineterm="",
+            n=10
         )
-        diff_output = list(diff)  # Consume generator
+        diff_output = list(diff)
 
         if not diff_output:
-            return  # No changes to print
+            return
 
         self.logger.info(f"--- Diff for '{rel_path}' ---")
         diff_lines = []
