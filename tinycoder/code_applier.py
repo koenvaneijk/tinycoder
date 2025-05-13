@@ -344,6 +344,7 @@ class CodeApplier:
 
         Compares the original content with the new content and displays the differences
         with more context lines (10 lines) and without the @@ markers for cleaner output.
+        Visually separates different edit sections for better readability.
 
         Args:
             rel_path: The relative path of the file being diffed, used in the diff header.
@@ -369,19 +370,34 @@ class CodeApplier:
 
         self.logger.info(f"--- Diff for '{rel_path}' ---")
         diff_lines = []
+        in_edit_block = False
+        found_change = False
+        
         for line in diff_output:
             line = line.rstrip("\n")  # Remove trailing newline for cleaner printing
+            
             if line.startswith("+++") or line.startswith("---"):
                 # Skip the file header lines for cleaner output
                 continue
             elif line.startswith("@@"):
-                # Skip the @@ position markers for cleaner output
-                continue
-            elif line.startswith("+"):
+                # When we hit a new @@ marker, insert a separator if we were in an edit block
+                if in_edit_block and found_change:
+                    diff_lines.append("-" * 40)  # Visual separator between edit sections
+                in_edit_block = True
+                found_change = False
+                continue  # Skip the @@ position markers
+            
+            # Track if we've found any actual changes in this edit block
+            if line.startswith("+") or (line.startswith("-") and not line.startswith("---")):
+                found_change = True
+            
+            # Format the line with color
+            if line.startswith("+"):
                 diff_lines.append(f"{COLORS['GREEN']}{line}{RESET}")
             elif line.startswith("-") and not line.startswith("---"):
                 diff_lines.append(f"{COLORS['RED']}{line}{RESET}")
             else:
                 diff_lines.append(line)
+                
         self.logger.info("\n".join(diff_lines))
         self.logger.info(f"--- End Diff for '{rel_path}' ---")
