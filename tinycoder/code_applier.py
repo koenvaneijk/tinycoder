@@ -340,10 +340,10 @@ class CodeApplier:
         self, rel_path: str, original_content: str, new_content: str
     ) -> None:
         """
-        Prints a unified diff of changes between two strings to the console.
+        Prints a unified diff of changes between two strings to the console with expanded context.
 
         Compares the original content with the new content and displays the differences
-        using standard unified diff format. If there are no differences, nothing is printed.
+        with more context lines (10 lines) and without the @@ markers for cleaner output.
 
         Args:
             rel_path: The relative path of the file being diffed, used in the diff header.
@@ -353,12 +353,14 @@ class CodeApplier:
         Side Effects:
             Prints the diff output directly to the standard output using logger.
         """
+        # Set n=10 to show 10 lines of context before and after changes
         diff = difflib.unified_diff(
             original_content.splitlines(keepends=True),
             new_content.splitlines(keepends=True),
             fromfile=f"{rel_path} (original)",
             tofile=f"{rel_path} (modified)",
             lineterm="",  # Avoid extra newlines from difflib
+            n=10  # Show 10 lines of context instead of default 3
         )
         diff_output = list(diff)  # Consume generator
 
@@ -369,11 +371,11 @@ class CodeApplier:
         diff_lines = []
         for line in diff_output:
             line = line.rstrip("\n")  # Remove trailing newline for cleaner printing
-            if line.startswith("+++"):
-                # Skip the '+++ b/...' line for cleaner output
+            if line.startswith("+++") or line.startswith("---"):
+                # Skip the file header lines for cleaner output
                 continue
-            elif line.startswith("---"):
-                # Skip the '--- a/...' line for cleaner output
+            elif line.startswith("@@"):
+                # Skip the @@ position markers for cleaner output
                 continue
             elif line.startswith("+"):
                 diff_lines.append(f"{COLORS['GREEN']}{line}{RESET}")
