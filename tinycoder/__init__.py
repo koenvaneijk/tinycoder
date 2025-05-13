@@ -80,7 +80,7 @@ def main():
             else:
                 model_str = model_name
         elif args.provider == "gemini":
-            model_name = args.model or "gemini-2.5-pro-preview-03-25"
+            model_name = args.model or "gemini-2.5-pro-preview-05-06"
             if not model_name.startswith("gemini-"):
                 model_str = f"gemini-{model_name}"
             else:

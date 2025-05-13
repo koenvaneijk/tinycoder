@@ -7,7 +7,7 @@ from typing import List, Dict, Optional, Tuple
 from tinycoder.llms.base import LLMClient  # Import the base class
 
 # Default model - can be overridden by constructor or --model arg
-DEFAULT_GEMINI_MODEL = "gemini-2.5-pro-preview-03-25"  # Keep Gemini-specific default
+DEFAULT_GEMINI_MODEL = "gemini-2.5-pro-preview-05-06"  # Keep Gemini-specific default
 # Using generateContent as streamGenerateContent requires handling streamed responses.
 # Sticking to generateContent for now based on simpler non-streaming parsing.
 # If streamGenerateContent is strictly needed, response handling must be updated.
