@@ -13,7 +13,7 @@ ANTHROPIC_API_VERSION = "2023-06-01"
 ANTHROPIC_API_KEY_ENV_VAR = "ANTHROPIC_API_KEY"
 
 # Anthropic requires max_tokens. 4096 is a reasonable default upper limit.
-DEFAULT_MAX_TOKENS = 4096
+DEFAULT_MAX_TOKENS = 20000
 
 
 class AnthropicClient(LLMClient):
