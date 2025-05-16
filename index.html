@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Monaco Editor Diff Example</title>
+    <style>
+        #container {
+            width: 800px;
+            height: 600px;
+            border: 1px solid grey;
+        }
+    </style>
+</head>
+<body>
+
+<h2>Monaco Editor Diff</h2>
+<div id="container"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.43.0/min/vs/loader.js"></script>
+<script>
+    require.config({ paths: { 'vs': 'https://cdn.jsdelivr.net/npm/monaco-editor@0.43.0/min/vs' }});
+    require(['vs/editor/editor.main'], function () {
+        var originalModel = monaco.editor.createModel(
+            [
+                'function myFunction() {',
+                '    console.log("Hello world!");',
+                '    // This is an old comment',
+                '    return 123;',
+                '}'
+            ].join('\\n'),
+            'javascript'
+        );
+
+        var modifiedModel = monaco.editor.createModel(
+            [
+                'function myUpdatedFunction() {',
+                '    console.log("Hello Monaco!");',
+                '    // This is an updated comment',
+                '    // A new line added',
+                '    return 456;',
+                '}'
+            ].join('\\n'),
+            'javascript'
+        );
+
+        var diffEditor = monaco.editor.createDiffEditor(document.getElementById('container'), {
+            enableSplitViewResizing: true,
+            renderSideBySide: true // true for side-by-side, false for inline
+        });
+
+        diffEditor.setModel({
+            original: originalModel,
+            modified: modifiedModel
+        });
+    });
+</script>
+
+</body>
+</html>
