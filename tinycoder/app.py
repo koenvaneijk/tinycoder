@@ -965,8 +965,8 @@ class App:
             # Using default terminal color (bolded) for none
             active_rules_status_output_str = f"{STYLES['BOLD']}None{RESET}"
         
-        active_rules_line = f"  Active Rules: {active_rules_status_output_str}"
-        help_line = "  Type /help for commands, or !<cmd> to run shell commands."
+        active_rules_line = f"  Rules: {active_rules_status_output_str}"
+        help_line = f"  Type {FmtColors['CYAN']}{STYLES['BOLD']}/help{RESET} for commands, or {FmtColors['CYAN']}{STYLES['BOLD']}!<cmd>{RESET} to run shell commands. \n"
 
         # Log each part on a new line for clarity
         self.logger.info(model_line)
