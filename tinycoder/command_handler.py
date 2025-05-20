@@ -33,6 +33,9 @@ class CommandHandler:
         toggle_repo_map_func: Callable[[bool], None],
         get_repo_map_str_func: Callable[[], str],
         suggest_files_func: Callable[[Optional[str]], None],
+        add_repomap_exclusion_func: Callable[[str], bool],
+        remove_repomap_exclusion_func: Callable[[str], bool],
+        get_repomap_exclusions_func: Callable[[], list[str]],
     ):
         """
         Initializes the CommandHandler.
@@ -53,6 +56,9 @@ class CommandHandler:
             toggle_repo_map_func: Function to toggle repo map inclusion in prompts.
             get_repo_map_str_func: Function to get the current repository map as a string.
             suggest_files_func: Function to ask LLM for file suggestions and handle adding them.
+            add_repomap_exclusion_func: Function to add a path/pattern to repomap exclusions.
+            remove_repomap_exclusion_func: Function to remove a path/pattern from repomap exclusions.
+            get_repomap_exclusions_func: Function to get the list of current repomap exclusions.
         """
         self.file_manager = file_manager
         self.git_manager = git_manager
@@ -69,6 +75,9 @@ class CommandHandler:
         self.toggle_repo_map = toggle_repo_map_func
         self.get_repo_map_str_func = get_repo_map_str_func
         self.suggest_files_func = suggest_files_func
+        self.add_repomap_exclusion = add_repomap_exclusion_func
+        self.remove_repomap_exclusion = remove_repomap_exclusion_func
+        self.get_repomap_exclusions = get_repomap_exclusions_func
         self.logger = logging.getLogger(__name__)
 
     # _run_tests method removed
@@ -214,21 +223,52 @@ class CommandHandler:
             return True, None
 
         elif command == "/repomap":
-            if args_str == "on":
-                self.toggle_repo_map(True)
-            elif args_str == "off":
-                self.toggle_repo_map(False)
-            elif args_str == "show":
-                repo_map_content = self.get_repo_map_str_func()
-                if repo_map_content and repo_map_content != "Repository map is not available at this moment." and repo_map_content.strip() != "Repository Map (other files):": # Check if map is truly empty
+            repomap_parts = args_str.split(maxsplit=1)
+            sub_command = repomap_parts[0] if repomap_parts else None
+            pattern_arg = repomap_parts[1].strip() if len(repomap_parts) > 1 else None
 
+            if sub_command == "on":
+                self.toggle_repo_map(True)
+            elif sub_command == "off":
+                self.toggle_repo_map(False)
+            elif sub_command == "show":
+                repo_map_content = self.get_repo_map_str_func()
+                if repo_map_content and repo_map_content != "Repository map is not available at this moment." and repo_map_content.strip() != "Repository Map (other files):":
                     self.logger.info("--- Current Repository Map ---\n" + repo_map_content)
                 else:
-                    self.logger.info("Repository map is currently empty or contains no files to display (excluding files already in chat context).")
-            elif not args_str:
-                 self.logger.error("Usage: /repomap <on|off|show>")
+                    self.logger.info("Repository map is currently empty, contains no unignored files (excluding those already in chat), or all mappable items are excluded.")
+            elif sub_command == "exclude":
+                if not pattern_arg:
+                    self.logger.error("Usage: /repomap exclude <path_or_pattern>")
+                    self.logger.info("  Example: /repomap exclude tests/data/  (to exclude a directory)")
+                    self.logger.info("  Example: /repomap exclude src/temp_script.py (to exclude a file)")
+                else:
+                    if self.add_repomap_exclusion(pattern_arg):
+                        self.logger.info(f"Added '{pattern_arg}' to repomap exclusions. It will be ignored when generating the map.")
+                        self.logger.info("Note: Use a trailing '/' for directories (e.g., 'docs/').")
+                    else:
+                        self.logger.info(f"'{pattern_arg}' is already in repomap exclusions or is an empty pattern.")
+            elif sub_command == "include": # "include" means remove from exclusions
+                if not pattern_arg:
+                    self.logger.error("Usage: /repomap include <path_or_pattern_to_remove_from_exclusions>")
+                else:
+                    if self.remove_repomap_exclusion(pattern_arg):
+                        self.logger.info(f"Removed '{pattern_arg}' from repomap exclusions. It will now be considered for the map if it exists.")
+                    else:
+                        self.logger.info(f"'{pattern_arg}' was not found in repomap exclusions or is an empty pattern.")
+            elif sub_command == "list_exclusions":
+                exclusions = self.get_repomap_exclusions()
+                if exclusions:
+                    self.logger.info("Current repomap exclusion patterns (relative to project root):")
+                    for pattern in exclusions:
+                        self.logger.info(f"  - {pattern}")
+                else:
+                    self.logger.info("No repomap exclusion patterns are currently set.")
+            elif sub_command is None and not pattern_arg : # Just /repomap
+                 self.logger.error("Usage: /repomap <on|off|show|exclude|include|list_exclusions> [pattern]")
             else:
-                self.logger.error(f"Invalid argument for /repomap: '{args_str}'. Use 'on', 'off', or 'show'.")
+                self.logger.error(f"Invalid argument or sub-command for /repomap: '{args_str}'.")
+                self.logger.info("  Use: on, off, show, exclude <pattern>, include <pattern>, list_exclusions")
             return True, None
 
         elif command == "/edit":
@@ -279,7 +319,10 @@ class CommandHandler:
   /rules list                 List available built-in and custom rules and their status for this project.
   /rules enable <rule_name>   Enable a rule for this project.
   /rules disable <rule_name>  Disable a rule for this project.
-  /repomap [on|off|show]      Enable, disable, or show the inclusion of the repository map in prompts.
+  /repomap on|off|show        Enable, disable, or show the repository map in prompts.
+  /repomap exclude <pattern>  Exclude a file or directory (e.g., 'docs/', 'src/config.py') from the repo map.
+  /repomap include <pattern>  Remove a pattern from the exclusion list.
+  /repomap list_exclusions    List current repo map exclusion patterns.
   /help                       Show this help message.
   /exit or /quit              Exit the application.
   !<shell_command>           Execute a shell command in the project directory."""

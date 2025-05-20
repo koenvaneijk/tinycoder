@@ -336,6 +336,9 @@ class App:
             toggle_repo_map_func=self.toggle_repo_map,
             get_repo_map_str_func=self._get_current_repo_map_string,
             suggest_files_func=self._ask_llm_for_files_based_on_context,
+            add_repomap_exclusion_func=self.repo_map.add_user_exclusion,
+            remove_repomap_exclusion_func=self.repo_map.remove_user_exclusion,
+            get_repomap_exclusions_func=self.repo_map.get_user_exclusions,
         )
         self.logger.debug("CommandHandler initialized.")
 

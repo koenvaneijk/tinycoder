@@ -1,5 +1,6 @@
 import ast
 import logging
+import json # Added for loading/saving exclusions
 from html.parser import HTMLParser
 
 # Try importing unparse for argument formatting (Python 3.9+)
@@ -18,10 +19,18 @@ from .local_import import find_local_imports_with_entities
 class RepoMap:
     """Generates a simple repository map for Python files using AST."""
 
+    _EXCLUSIONS_DIR_NAME = ".tinycoder"
+    _EXCLUSIONS_FILE_NAME = "repomap_exclusions.json"
+
     def __init__(self, root: Optional[str]):
         self.root = Path(root) if root else Path.cwd()
         self.logger = logging.getLogger(__name__)
-        # Shared exclude dirs for file discovery
+
+        self.exclusions_config_path = self.root / self._EXCLUSIONS_DIR_NAME / self._EXCLUSIONS_FILE_NAME
+        self.user_exclusions: Set[str] = set()
+        self._load_user_exclusions()
+
+        # Shared exclude dirs for file discovery (built-in global ignores)
         self.exclude_dirs = {
             ".venv",
             "venv",
@@ -39,20 +48,125 @@ class RepoMap:
     def get_py_files(self) -> Generator[Path, None, None]:
         """Yields all .py files in the repository root, excluding common folders."""
         for path in self.root.rglob("*.py"):
-            # Check against self.exclude_dirs
+            # Check against self.exclude_dirs (built-in global ignores)
             if any(part in self.exclude_dirs for part in path.parts):
                 continue
+
+            # Check against user-defined exclusions
+            try:
+                rel_path = path.relative_to(self.root)
+                if self._is_path_excluded_by_user_config(rel_path):
+                    continue
+            except ValueError:
+                # Should not happen for paths from rglob under self.root
+                self.logger.debug(f"Path {path} could not be made relative to {self.root}, skipping user exclusion check.")
+                continue
+            
             if path.is_file():
                 yield path
 
     def get_html_files(self) -> Generator[Path, None, None]:
         """Yields all .html files in the repository root, excluding common folders."""
         for path in self.root.rglob("*.html"):
-            # Check against self.exclude_dirs
+            # Check against self.exclude_dirs (built-in global ignores)
             if any(part in self.exclude_dirs for part in path.parts):
                 continue
+
+            # Check against user-defined exclusions
+            try:
+                rel_path = path.relative_to(self.root)
+                if self._is_path_excluded_by_user_config(rel_path):
+                    continue
+            except ValueError:
+                self.logger.debug(f"Path {path} could not be made relative to {self.root}, skipping user exclusion check.")
+                continue
+
             if path.is_file():
                 yield path
+
+    def _normalize_exclusion_pattern(self, pattern: str) -> str:
+        """Normalizes an exclusion pattern string."""
+        # Replace backslashes with forward slashes and strip whitespace
+        normalized = pattern.replace('\\', '/').strip()
+        # Ensure no leading slash for comparison with relative_to results
+        if normalized.startswith('/'):
+            normalized = normalized[1:]
+        # Trailing slash for directories is significant and should be preserved if user provides it.
+        return normalized
+
+    def _load_user_exclusions(self) -> None:
+        """Loads user-defined exclusions from the project-specific config file."""
+        if self.exclusions_config_path.exists():
+            try:
+                with open(self.exclusions_config_path, "r", encoding="utf-8") as f:
+                    exclusions_list = json.load(f)
+                if isinstance(exclusions_list, list):
+                    self.user_exclusions = {self._normalize_exclusion_pattern(p) for p in exclusions_list if isinstance(p, str)}
+                    self.logger.debug(f"Loaded {len(self.user_exclusions)} repomap exclusions from {self.exclusions_config_path}")
+                else:
+                    self.logger.warning(f"Invalid format in {self.exclusions_config_path}. Expected a JSON list. Ignoring.")
+            except FileNotFoundError:
+                # This case should be covered by .exists(), but good practice.
+                self.logger.debug(f"Repomap exclusions file not found at {self.exclusions_config_path}. No user exclusions loaded.")
+            except json.JSONDecodeError:
+                self.logger.error(f"Error decoding JSON from {self.exclusions_config_path}. Ignoring user exclusions.")
+            except Exception as e:
+                self.logger.error(f"Failed to load repomap exclusions from {self.exclusions_config_path}: {e}")
+        else:
+            self.logger.debug(f"Repomap exclusions file {self.exclusions_config_path} does not exist. No user exclusions loaded.")
+
+    def _save_user_exclusions(self) -> None:
+        """Saves the current user-defined exclusions to the project-specific config file."""
+        try:
+            self.exclusions_config_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.exclusions_config_path, "w", encoding="utf-8") as f:
+                json.dump(sorted(list(self.user_exclusions)), f, indent=2)
+            self.logger.debug(f"Saved {len(self.user_exclusions)} repomap exclusions to {self.exclusions_config_path}")
+        except Exception as e:
+            self.logger.error(f"Failed to save repomap exclusions to {self.exclusions_config_path}: {e}")
+
+    def add_user_exclusion(self, pattern: str) -> bool:
+        """Adds a pattern to user exclusions and saves. Returns True if added, False if already present."""
+        normalized_pattern = self._normalize_exclusion_pattern(pattern)
+        if not normalized_pattern:
+            self.logger.warning("Attempted to add an empty exclusion pattern. Ignoring.")
+            return False
+        if normalized_pattern in self.user_exclusions:
+            return False
+        self.user_exclusions.add(normalized_pattern)
+        self._save_user_exclusions()
+        return True
+
+    def remove_user_exclusion(self, pattern: str) -> bool:
+        """Removes a pattern from user exclusions and saves. Returns True if removed, False if not found."""
+        normalized_pattern = self._normalize_exclusion_pattern(pattern)
+        if not normalized_pattern:
+            self.logger.warning("Attempted to remove an empty exclusion pattern. Ignoring.")
+            return False
+        if normalized_pattern in self.user_exclusions:
+            self.user_exclusions.remove(normalized_pattern)
+            self._save_user_exclusions()
+            return True
+        return False
+
+    def get_user_exclusions(self) -> List[str]:
+        """Returns a sorted list of current user-defined exclusion patterns."""
+        return sorted(list(self.user_exclusions))
+
+    def _is_path_excluded_by_user_config(self, rel_path: Path) -> bool:
+        """Checks if a relative path matches any user-defined exclusion pattern."""
+        # Convert rel_path to a normalized string (forward slashes, no leading slash)
+        # Path.as_posix() ensures forward slashes.
+        normalized_rel_path_str = rel_path.as_posix()
+
+        for pattern in self.user_exclusions:
+            if pattern.endswith('/'):  # Directory pattern (e.g., "docs/", "tests/fixtures/")
+                if normalized_rel_path_str.startswith(pattern):
+                    return True
+            else:  # File pattern (e.g., "src/main.py", "config.ini")
+                if normalized_rel_path_str == pattern:
+                    return True
+        return False
 
     def _format_args(self, args_node: ast.arguments) -> str:
         """Formats ast.arguments into a string."""
@@ -403,7 +517,7 @@ class RepoMap:
             structure = self.get_html_structure(file_path)
             if structure:
                 file_map_lines = [f"\n`{rel_path_str}`:"] + structure
-                # map_sections["HTML Files"].extend(file_map_lines) TODO FIX
+                map_sections["HTML Files"].extend(file_map_lines)
                 processed_html_files += 1
 
         # --- Combine Sections ---
