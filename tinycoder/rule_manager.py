@@ -35,6 +35,7 @@ class RuleManager:
 
         self.discovered_rules: Dict[str, Dict[str, Any]] = {}
         self.active_rules_content: str = ""
+        self.last_loaded_rule_names: Set[str] = set() # Stores names of successfully loaded rules
 
         self._discover_rules()
         self.load_active_rules_content()  # Load initially
@@ -181,10 +182,12 @@ class RuleManager:
                     self.logger.error(f"Failed to read built-in rule resource {BUILTIN_RULES_PACKAGE}/{rule_info['path']}: {e}")
 
         self.active_rules_content = "\n".join(active_rules_content_parts)
+        self.last_loaded_rule_names = loaded_rule_names # Store the set of loaded rule names
+        
         if loaded_rule_names:
-             self.logger.info(f"Loaded {len(loaded_rule_names)} active rule(s) for this project: {', '.join(sorted(loaded_rule_names))}")
+             self.logger.debug(f"Loaded {len(loaded_rule_names)} active rule(s) for this project: {', '.join(sorted(loaded_rule_names))}")
         else:
-             self.logger.info("No active rules enabled or loaded for this project.")
+             self.logger.debug("No active rules enabled or loaded for this project.")
         return self.active_rules_content
 
     def get_active_rules_content(self) -> str:

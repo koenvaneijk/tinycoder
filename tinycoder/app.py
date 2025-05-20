@@ -946,15 +946,31 @@ class App:
         # The rest of the message will use the default INFO format (terminal default color).
         
         # Constructing the welcome message parts
-        welcome_line = f"Welcome to {FmtColors['GREEN']}{STYLES['BOLD']}{APP_NAME}{RESET}!"
         model_line = f"  Model: {FmtColors['GREEN']}{STYLES['BOLD']}{self.model}{RESET}"
         repo_map_line = f"  Repo Map: {repo_map_status_output_str}"
+
+        # Active Rules status
+        num_active_rules = len(self.rule_manager.last_loaded_rule_names)
+        active_rules_names_sorted = sorted(list(self.rule_manager.last_loaded_rule_names))
+        
+        active_rules_status_output_str: str
+        if num_active_rules > 0:
+            max_names_to_show = 2 # Be concise for welcome message
+            names_str = ", ".join(active_rules_names_sorted[:max_names_to_show])
+            if num_active_rules > max_names_to_show:
+                names_str += f", ... ({num_active_rules - max_names_to_show} more)"
+            
+            active_rules_status_output_str = f"{FmtColors['BLUE']}{STYLES['BOLD']}Enabled ({num_active_rules}){RESET} [{names_str}]"
+        else:
+            active_rules_status_output_str = f"{FmtColors['GREY']}{STYLES['BOLD']}None{RESET}"
+        
+        active_rules_line = f"  Active Rules: {active_rules_status_output_str}"
         help_line = "  Type /help for commands, or !<cmd> to run shell commands."
 
         # Log each part on a new line for clarity
-        self.logger.info(welcome_line)
         self.logger.info(model_line)
         self.logger.info(repo_map_line)
+        self.logger.info(active_rules_line)
         self.logger.info(help_line)
         
         ctrl_c_pressed_once = False # Initialize flag outside the loop
