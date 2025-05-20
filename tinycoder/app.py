@@ -923,8 +923,23 @@ class App:
 
     def run(self):
         """Main loop for the chat application."""
-        # Determine repo map status string
-        repo_map_status = "Enabled" if self.include_repo_map else "Disabled"
+        # Determine repo map status string with more detail
+        repo_map_status_output_str: str
+        if self.include_repo_map:
+            user_exclusions = self.repo_map.get_user_exclusions()
+            if user_exclusions:
+                num_exclusions = len(user_exclusions)
+                exclusions_details = f"with {num_exclusions} exclusion"
+                if num_exclusions > 1:
+                    exclusions_details += "s"
+                # Using YELLOW for enabled with exclusions
+                repo_map_status_output_str = f"{FmtColors['YELLOW']}{STYLES['BOLD']}Enabled ({exclusions_details}){RESET}"
+            else:
+                # Using BLUE for standard enabled (no exclusions)
+                repo_map_status_output_str = f"{FmtColors['BLUE']}{STYLES['BOLD']}Enabled{RESET}"
+        else:
+            # Using GREY for disabled
+            repo_map_status_output_str = f"{FmtColors['GREY']}{STYLES['BOLD']}Disabled{RESET}"
         
         # Use FmtColors and STYLES for the welcome message
         # Apply specific color (GREEN) before BOLD, then RESET immediately after.
@@ -932,7 +947,7 @@ class App:
         self.logger.info(
             f"Welcome to {FmtColors['GREEN']}{STYLES['BOLD']}{APP_NAME}{RESET}! "
             f"Model: {FmtColors['GREEN']}{STYLES['BOLD']}{self.model}{RESET}. "
-            f"Repo Map: {FmtColors['BLUE']}{STYLES['BOLD']}{repo_map_status}{RESET}. "
+            f"Repo Map: {repo_map_status_output_str}. "
             f"Type /help for commands, !<cmd> to run shell commands.",
         )
 
