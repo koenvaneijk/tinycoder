@@ -935,11 +935,11 @@ class App:
                 # Using YELLOW for enabled with exclusions
                 repo_map_status_output_str = f"{FmtColors['YELLOW']}{STYLES['BOLD']}Enabled ({exclusions_details}){RESET}"
             else:
-                # Using BLUE for standard enabled (no exclusions)
-                repo_map_status_output_str = f"{FmtColors['BLUE']}{STYLES['BOLD']}Enabled{RESET}"
+                # Using GREEN for standard enabled (no exclusions)
+                repo_map_status_output_str = f"{FmtColors['GREEN']}{STYLES['BOLD']}Enabled{RESET}"
         else:
-            # Using GREY for disabled
-            repo_map_status_output_str = f"{FmtColors['GREY']}{STYLES['BOLD']}Disabled{RESET}"
+            # Using default terminal color (bolded) for disabled
+            repo_map_status_output_str = f"{STYLES['BOLD']}Disabled{RESET}"
         
         # Use FmtColors and STYLES for the welcome message
         # Apply specific color (GREEN) before BOLD, then RESET immediately after.
@@ -960,9 +960,10 @@ class App:
             if num_active_rules > max_names_to_show:
                 names_str += f", ... ({num_active_rules - max_names_to_show} more)"
             
-            active_rules_status_output_str = f"{FmtColors['BLUE']}{STYLES['BOLD']}Enabled ({num_active_rules}){RESET} [{names_str}]"
+            active_rules_status_output_str = f"{FmtColors['GREEN']}{STYLES['BOLD']}Enabled ({num_active_rules}){RESET} [{names_str}]"
         else:
-            active_rules_status_output_str = f"{FmtColors['GREY']}{STYLES['BOLD']}None{RESET}"
+            # Using default terminal color (bolded) for none
+            active_rules_status_output_str = f"{STYLES['BOLD']}None{RESET}"
         
         active_rules_line = f"  Active Rules: {active_rules_status_output_str}"
         help_line = "  Type /help for commands, or !<cmd> to run shell commands."
