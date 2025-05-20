@@ -43,16 +43,22 @@ class ConsoleInterface:
         # Mode prefix for the prompt
         current_mode = self.get_app_mode()
         mode_prefix = f"{STYLES['BOLD']}{FmtColors['GREEN']}({current_mode}){RESET} "
-        prompt = f"{mode_prefix}> "
+        
+        # Initial prompt for the first line
+        first_line_prompt = f"{mode_prefix}> "
+        # Continuation prompt for subsequent lines
+        continuation_prompt = f"{mode_prefix}.. "
+        
+        prompt_to_use = first_line_prompt
 
         while True:
             try:
                 # Use input() to leverage readline's line editing, history, and completion
-                line = input(prompt)
+                line = input(prompt_to_use)
                 lines.append(line)
-                # Change prompt for subsequent lines (optional, but common)
-                # Keep it simple for now
-                # prompt = f"{mode_prefix}.. "
+                # Change prompt for subsequent lines
+                if prompt_to_use == first_line_prompt:
+                    prompt_to_use = continuation_prompt
             except EOFError: # Handle Ctrl+D (or Ctrl+Z+Enter on Windows sometimes)
                 print() # Print a newline for cleaner exit after EOF
                 break
