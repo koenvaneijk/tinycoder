@@ -944,13 +944,19 @@ class App:
         # Use FmtColors and STYLES for the welcome message
         # Apply specific color (GREEN) before BOLD, then RESET immediately after.
         # The rest of the message will use the default INFO format (terminal default color).
-        self.logger.info(
-            f"Welcome to {FmtColors['GREEN']}{STYLES['BOLD']}{APP_NAME}{RESET}! "
-            f"Model: {FmtColors['GREEN']}{STYLES['BOLD']}{self.model}{RESET}. "
-            f"Repo Map: {repo_map_status_output_str}. "
-            f"Type /help for commands, !<cmd> to run shell commands.",
-        )
+        
+        # Constructing the welcome message parts
+        welcome_line = f"Welcome to {FmtColors['GREEN']}{STYLES['BOLD']}{APP_NAME}{RESET}!"
+        model_line = f"  Model: {FmtColors['GREEN']}{STYLES['BOLD']}{self.model}{RESET}"
+        repo_map_line = f"  Repo Map: {repo_map_status_output_str}"
+        help_line = "  Type /help for commands, or !<cmd> to run shell commands."
 
+        # Log each part on a new line for clarity
+        self.logger.info(welcome_line)
+        self.logger.info(model_line)
+        self.logger.info(repo_map_line)
+        self.logger.info(help_line)
+        
         ctrl_c_pressed_once = False # Initialize flag outside the loop
         while True:
             try:
