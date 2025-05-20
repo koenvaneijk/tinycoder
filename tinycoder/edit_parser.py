@@ -3,77 +3,121 @@ from typing import List, Tuple
 import logging
 
 class EditParser:
-    """Parses LLM responses to extract structured edit blocks in the new XML format."""
+    """
+    Parses LLM responses to extract structured edit operations described
+    in the simplified <edit path="..."> XML format.
+    Uses a more nuanced approach to stripping newlines from code blocks.
+    """
 
     def __init__(self):
         """Initializes the EditParser."""
         self.logger = logging.getLogger(__name__)
-
-        # Regex patterns for the new XML structure
-        # Using non-greedy matching (.*?) and DOTALL (s) flag
-        # Captures the path attribute and the content inside <file>
-        self.file_block_pattern = re.compile(
-            r"<file path=\"(.*?)\">([\s\S]*?)</file>", re.DOTALL
+        self.edit_pattern = re.compile(
+            r"<edit path=\"(.*?)\">([\s\S]*?)</edit>", re.DOTALL
         )
-        # Captures the content inside <edit_block>
-        self.edit_block_pattern = re.compile(
-            r"<edit_block>([\s\S]*?)</edit_block>", re.DOTALL
-        )
-        # Captures the content inside <old_code>
         self.old_code_pattern = re.compile(
             r"<old_code>([\s\S]*?)</old_code>", re.DOTALL
         )
-        # Captures the content inside <new_code>
         self.new_code_pattern = re.compile(
             r"<new_code>([\s\S]*?)</new_code>", re.DOTALL
         )
 
+    def _strip_formatting_newlines(self, text: str) -> str:
+        """
+        Removes a single leading newline and/or a single trailing newline if they exist.
+        This is to counteract typical XML pretty-printing by LLMs,
+        without stripping significant newlines that are part of the code block itself.
+        """
+        if not text: # Handle empty string case
+            return ""
+        
+        s = text
+        
+        if s.startswith('\n'):
+            s = s[1:]
+        
+        if not s: # If original was just "\n"
+            return ""
+            
+        if s.endswith('\n'):
+            s = s[:-1]
+            
+        return s
+
     def parse(self, response: str) -> List[Tuple[str, str, str]]:
-        """Parses XML-structured edit blocks from the LLM response."""
+        """
+        Parses XML-structured edit operations from the LLM response.
+        Each operation is expected to be in an <edit path="...">...</edit> block.
+
+        Args:
+            response: The string response from the LLM.
+
+        Returns:
+            A list of tuples, where each tuple contains:
+            (file_path: str, old_code_content: str, new_code_content: str)
+        """
         edits = []
 
-        # Find all <file> blocks in the response
-        for file_match in self.file_block_pattern.finditer(response):
-            # group(1) is the path, group(2) is the content inside <file>
-            fname = file_match.group(1).strip()
-            file_content = file_match.group(2)
+        for edit_match in self.edit_pattern.finditer(response):
+            raw_path = edit_match.group(1)
+            edit_content = edit_match.group(2)
+            
+            fname = raw_path.strip() # Path attribute value can still be stripped normally
 
             if not fname:
                 self.logger.warning(
-                    "Skipping <file> block with empty or missing path attribute."
+                    "Skipping <edit> block with empty or missing path attribute value."
                 )
-                continue  # Skip this file block if path is empty
+                continue
 
-            # Find all <edit_block> blocks within the current <file> content
-            for edit_match in self.edit_block_pattern.finditer(file_content):
-                edit_content = edit_match.group(1)  # Content inside <edit_block>
+            old_code_raw = "" 
+            old_code_match = self.old_code_pattern.search(edit_content)
+            if old_code_match:
+                old_code_raw = old_code_match.group(1)
+            else:
+                self.logger.warning(
+                    f"Missing <old_code> tag within <edit path=\"{fname}\">. Assuming empty old_code."
+                )
+            
+            # Apply nuanced stripping for code content
+            old_code = self._strip_formatting_newlines(old_code_raw)
 
-                # Extract content from <old_code> and <new_code> within the edit block
-                # Default to empty string if tags are not found (though they should be)
-                old_code = ""  # Initialize
-                old_code_match = self.old_code_pattern.search(edit_content)
-                if old_code_match:
-                    # Strip leading/trailing whitespace AFTER extraction
-                    old_code = old_code_match.group(1).strip()
+            new_code_raw = ""
+            new_code_match = self.new_code_pattern.search(edit_content)
+            if new_code_match:
+                new_code_raw = new_code_match.group(1)
+            else:
+                self.logger.warning(
+                    f"Missing <new_code> tag within <edit path=\"{fname}\">. Assuming empty new_code."
+                )
 
-                new_code = ""  # Initialize
-                new_code_match = self.new_code_pattern.search(edit_content)
-                if new_code_match:
-                    # Strip leading/trailing whitespace AFTER extraction
-                    new_code = new_code_match.group(1).strip()
-                    
-                # Normalize line endings
-                old_code = old_code.replace("\r\n", "\n")
-                new_code = new_code.replace("\r\n", "\n")
+            # Apply nuanced stripping for code content
+            new_code = self._strip_formatting_newlines(new_code_raw)
+                
+            # Normalize line endings AFTER stripping formatting newlines
+            old_code = old_code.replace("\r\n", "\n")
+            new_code = new_code.replace("\r\n", "\n")
 
-                # Append the extracted edit to the list
-                # Check if both are effectively empty after stripping, treat old_code as truly empty
-                if old_code == "" and new_code == "":
-                    self.logger.warning(
-                        f"Found edit block with empty <old_code> and <new_code> for file {fname}. Skipping edit."
-                    )
-                    continue  # Skip edits that would do nothing
+            if old_code == "" and new_code == "":
+                self.logger.warning(
+                    f"Found edit operation with effectively empty <old_code> and <new_code> "
+                    f"for file '{fname}' after processing. Skipping this operation."
+                )
+                continue 
 
-                edits.append((fname, old_code, new_code))
+            edits.append((fname, old_code, new_code))
+
+        if not edits and response.strip():
+            if any(tag in response for tag in ["<edit", "<old_code>", "<new_code>"]):
+                 self.logger.warning(
+                    "LLM response contained edit-related tags but no valid <edit path=...>...</edit> "
+                    "structures were successfully parsed. The XML might be malformed."
+                 )
+            else:
+                self.logger.info(
+                    "No <edit path=...> blocks found in the LLM response."
+                )
+        elif not response.strip():
+             self.logger.info("Received an empty response from LLM.")
 
         return edits

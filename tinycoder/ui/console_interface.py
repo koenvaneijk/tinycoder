@@ -47,7 +47,7 @@ class ConsoleInterface:
         # Initial prompt for the first line
         first_line_prompt = f"{mode_prefix}> "
         # Continuation prompt for subsequent lines
-        continuation_prompt = f"{mode_prefix}.. "
+        continuation_prompt = f"{mode_prefix}. "
         
         prompt_to_use = first_line_prompt
 
