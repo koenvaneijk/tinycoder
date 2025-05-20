@@ -3,16 +3,32 @@ import os
 import argparse
 
 from tinycoder.preferences import save_user_preference, load_user_preference_model
+from tinycoder.ui.log_formatter import COLORS, RESET
 
 APP_NAME = "tinycoder"
 
 def main():
-    print(r"""  _   _                     _         
- | |_(_)_ _ _  _ __ ___  __| |___ _ _ 
- |  _| | ' \ || / _/ _ \/ _` / -_) '_|
-  \__|_|_||_\_, \__\___/\__,_\___|_|  
-            |__/                      
-          """)
+    ascii_art_lines = [
+        r"  _   _                     _         ",
+        r" | |_(_)_ _ _  _ __ ___  __| |___ _ _ ",
+        r" |  _| | ' \ || / _/ _ \/ _` / -_) '_|",
+        r"  \__|_|_||_\_, \__\___/\__,_\___|_|  ",
+        r"            |__/                      "
+    ]
+
+    # Define a color sequence for the gradient
+    gradient_colors = [
+        COLORS.get("BRIGHT_CYAN", ""),
+        COLORS.get("CYAN", ""),
+        COLORS.get("BLUE", ""),
+        COLORS.get("MAGENTA", ""),
+        COLORS.get("BRIGHT_MAGENTA", "") 
+    ]
+
+    for i, line in enumerate(ascii_art_lines):
+        color = gradient_colors[i % len(gradient_colors)] # Cycle through colors
+        print(f"{color}{line}{RESET}")
+    print() # Add an extra newline for spacing after the art
 
     # Get default provider and model from environment variables
     default_provider = os.environ.get("TINYCODER_PROVIDER", None)
