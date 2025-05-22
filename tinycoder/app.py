@@ -1,6 +1,7 @@
 import logging
 import os
 import platform
+import re # Added for markdown formatting
 import sys
 import traceback
 from pathlib import Path
@@ -548,7 +549,7 @@ class App:
 
             total_tokens = (sum(len(msg["content"]) for msg in history_to_send) + len(system_prompt_text))/4
             
-            self.logger.info(f"Total tokens: {total_tokens}")
+            self.logger.debug(f"Approx. total tokens to send: {total_tokens}") # Changed to debug for less noise
 
             self.spinner.start()
             response_content, error_message = self.client.generate_content(
@@ -569,9 +570,15 @@ class App:
                 )
                 return None
             else:
-                self.logger.info("ASSISTANT: " + response_content)  # Print the response
-                n_tokens = len(response_content)/4
-                self.logger.info("Response tokens: %d", n_tokens)
+                # Format for display if in ask mode and not an edit block
+                if self.mode == "ask" and response_content and not response_content.strip().startswith("<"):
+                    display_response = self._format_markdown_for_terminal(response_content)
+                    self.logger.info("ASSISTANT: " + display_response)
+                else:
+                    self.logger.info("ASSISTANT: " + response_content)
+                
+                n_tokens = len(response_content)/4 # Based on raw response
+                self.logger.debug("Approx. response tokens: %d", n_tokens) # Changed to debug
             
                 return response_content
 
@@ -802,6 +809,73 @@ class App:
         """Resets state before processing a new user message."""
         self.lint_errors_found = {}
         self.reflected_message = None
+
+    def _format_markdown_for_terminal(self, markdown_text: str) -> str:
+        """Applies simple ANSI styling to markdown text for terminal readability."""
+        processed_lines = []
+        in_code_block = False
+        # Code block language is not used yet, but could be for syntax highlighting in future
+        # code_block_lang = "" 
+
+        for line in markdown_text.splitlines():
+            stripped_line = line.lstrip() # Use lstrip for checking prefixes, keep original indent for code blocks
+
+            # Handle Fenced Code Blocks
+            if stripped_line.startswith("```"):
+                if in_code_block:
+                    in_code_block = False
+                    # Color the fence itself
+                    processed_lines.append(FmtColors['GREY'] + line + RESET)
+                else:
+                    in_code_block = True
+                    # code_block_lang = stripped_line[3:].strip()
+                    # lang_display = f" ({code_block_lang})" if code_block_lang else ""
+                    processed_lines.append(FmtColors['GREY'] + line + RESET)
+                continue
+
+            if in_code_block:
+                # Preserve original line including leading spaces for indentation
+                processed_lines.append(FmtColors['GREEN'] + line + RESET)
+                continue
+
+            # Handle Headers (e.g., # H1, ## H2)
+            if stripped_line.startswith("#"):
+                level = 0
+                temp_line = stripped_line
+                while temp_line.startswith('#'):
+                    level += 1
+                    temp_line = temp_line[1:]
+                
+                if temp_line.startswith(' '): # Make sure it's a header, not just a line starting with #
+                    header_text = temp_line[1:]
+                    original_indent = line[:-len(stripped_line)] # Get leading whitespace
+                    if level == 1: # H1
+                        line = f"{original_indent}{STYLES['BOLD']}{FmtColors['BLUE']}# {header_text}{RESET}"
+                    elif level == 2: # H2
+                        line = f"{original_indent}{STYLES['BOLD']}{FmtColors['MAGENTA']}## {header_text}{RESET}"
+                    else: # H3+
+                        line = f"{original_indent}{STYLES['BOLD']}{FmtColors['CYAN']}{'#' * level} {header_text}{RESET}"
+            else:
+                # Handle Bold (**text** or __text__)
+                # Apply bold and then immediately reset. The reset also turns off previous colors if any.
+                # If we want to keep surrounding colors, this would need to be more complex.
+                # Using a non-greedy match (.*?)
+                line = re.sub(r'\*\*(.*?)\*\*', rf'{STYLES["BOLD"]}\1{RESET}', line)
+                line = re.sub(r'__(.*?)__', rf'{STYLES["BOLD"]}\1{RESET}', line) # STYLES.NORMAL might be needed if terminal holds bold
+
+                # Handle Inline Code (`code`) - apply after bold to allow `**bold code**`
+                # (though typical markdown `**`code`**` would be `code` bolded)
+                # For simplicity, this colors the content of `...`
+                line = re.sub(r'`(.*?)`', rf'{FmtColors["YELLOW"]}\1{RESET}', line)
+                
+                # Handle Lists (* item, - item, 1. item)
+                # Simple coloring of the marker. Preserves leading whitespace.
+                line = re.sub(r'^(\s*)(\* |\- |\+ )', rf'\1{FmtColors["CYAN"]}\2{RESET}', line, 1)
+                line = re.sub(r'^(\s*)([0-9]+\. )', rf'\1{FmtColors["CYAN"]}\2{RESET}', line, 1)
+            
+            processed_lines.append(line)
+
+        return "\n".join(processed_lines)
 
     def _handle_command(self, user_message: str) -> bool:
         """
