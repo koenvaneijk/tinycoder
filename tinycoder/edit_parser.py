@@ -77,23 +77,21 @@ if __name__ == '__main__':
 
     # Test case 1: Basic valid input
     response1 = """
-    Some introductory text.
-    <edit path="./path/to/file1.py">
-    <old_code>
-    print("hello old world")
-    </old_code>
-    <new_code>
-    print("hello new world")
-    </new_code>
-    </edit>
-    Some text in between.
-    <edit path="another/file.txt">
-    <old_code>old line1
-    old line2</old_code>
-    <new_code>new line1
-    new line2
-    new line3</new_code>
-    </edit>
+Some introductory text.
+<edit path="./path/to/file1.py">
+<old_code>
+print("hello old world")</old_code>
+<new_code>
+print("hello new world")</new_code>
+</edit>
+Some text in between.
+<edit path="another/file.txt">
+<old_code>old line1
+old line2</old_code>
+<new_code>new line1
+new line2
+new line3</new_code>
+</edit>
     """
     edits1 = parser.parse(response1)
     print("Edits from response 1:")
@@ -103,10 +101,10 @@ if __name__ == '__main__':
 
     # Test case 2: Empty path attribute
     response2 = """
-    <edit path="">
-    <old_code>foo</old_code>
-    <new_code>bar</new_code>
-    </edit>
+<edit path="">
+<old_code>foo</old_code>
+<new_code>bar</new_code>
+</edit>
     """
     edits2 = parser.parse(response2)
     print("Edits from response 2 (empty path):")
@@ -114,12 +112,12 @@ if __name__ == '__main__':
 
     # Test case 3: Missing old_code or new_code tags
     response3 = """
-    <edit path="file3.py">
-    <old_code>only old</old_code>
-    </edit>
-    <edit path="file4.py">
-    <new_code>only new</new_code>
-    </edit>
+<edit path="file3.py">
+<old_code>only old</old_code>
+</edit>
+<edit path="file4.py">
+<new_code>only new</new_code>
+</edit>
     """
     edits3 = parser.parse(response3)
     print("Edits from response 3 (missing tags):")
@@ -129,11 +127,11 @@ if __name__ == '__main__':
 
     # Test case 4: Both old_code and new_code are empty (or contain only whitespace)
     response4 = """
-    <edit path="file5.py">
-    <old_code>
-    </old_code>
-    <new_code>   </new_code>
-    </edit>
+<edit path="file5.py">
+<old_code>
+</old_code>
+<new_code>   </new_code>
+</edit>
     """
     edits4 = parser.parse(response4)
     print("Edits from response 4 (empty codes):")
@@ -141,14 +139,14 @@ if __name__ == '__main__':
 
     # Test case 5: Malformed XML (extra > in new_code closing tag, as per example)
     response5 = """
-    <edit path="./path/to/file.py">
-    <old_code>
-    A contiguous chunk of lines...
-    </old_code>
-    <new_code>
-    The lines to replace...
-    </new_code>> 
-    </edit>
+<edit path="./path/to/file.py">
+<old_code>
+A contiguous chunk of lines...
+</old_code>
+<new_code>
+The lines to replace...
+</new_code>> 
+</edit>
     """ # Note the `</new_code>>` - the regex should handle this gracefully.
     edits5 = parser.parse(response5)
     print("Edits from response 5 (malformed new_code tag):")
@@ -164,10 +162,10 @@ if __name__ == '__main__':
 
     # Test case 7: Edit block with content but old/new tags are empty
     response7 = """
-    <edit path="file7.py">
-    <old_code></old_code>
-    <new_code></new_code>
-    </edit>
+<edit path="file7.py">
+<old_code></old_code>
+<new_code></new_code>
+</edit>
     """
     edits7 = parser.parse(response7)
     print("Edits from response 7 (empty tags):")
@@ -175,10 +173,10 @@ if __name__ == '__main__':
 
     # Test case 8: Path with spaces (should be preserved by strip on attribute value, not content)
     response8 = """
-    <edit path=" path with spaces/file.py ">
-    <old_code>old</old_code>
-    <new_code>new</new_code>
-    </edit>
+<edit path=" path with spaces/file.py ">
+<old_code>old</old_code>
+<new_code>new</new_code>
+</edit>
     """
     edits8 = parser.parse(response8)
     print("Edits from response 8 (path with spaces):")
