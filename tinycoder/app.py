@@ -723,22 +723,7 @@ class App:
                     # else: # This case (not all_succeeded and not failed_indices) shouldn't happen
 
                 else:  # No edits found by parser
-                    # Check if the LLM just output code without the edit block format
-                    # Use the parser's regex for consistency
-                    code_block_match = self.edit_parser.edit_block_pattern.search(
-                        response
-                    )
-                    # Check if the *whole* response is just a code block (allow it),
-                    # but warn if code appears *within* text without the block format.
-                    is_just_code = response.strip().startswith(
-                        "```"
-                    ) and response.strip().endswith("```")
-                    if code_block_match and not is_just_code:
-                        self.logger.warning(
-                            "The LLM provided code but didn't use the required edit format. No changes applied.",
-                        )
-                    elif not code_block_match:  # No edits and no code blocks found
-                        self.logger.info("No edit blocks found in the response.")
+                    self.logger.info("No edit blocks found in the response.")
 
                 # --- Check for Lint Errors ---
                 if self.lint_errors_found:
