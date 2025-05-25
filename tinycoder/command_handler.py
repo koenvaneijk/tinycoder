@@ -1,5 +1,6 @@
 import re
 import logging
+from pathlib import Path # Added for globbing
 from typing import TYPE_CHECKING, Callable, Optional, Tuple
 
 from tinycoder.test_runner import run_tests
@@ -97,32 +98,104 @@ class CommandHandler:
         args_str = parts[1].strip() if len(parts) > 1 else ""
 
         if command == "/add":
-            filenames = re.findall(r"\"(.+?)\"|(\S+)", args_str)
-            filenames = [name for sublist in filenames for name in sublist if name]
-            if not filenames:
-                self.logger.error('Usage: /add <file1> ["file 2"] ...')
-            else:
-                for fname in filenames:
-                    if self.file_manager.add_file(fname):
-                        abs_path = self.file_manager.get_abs_path(fname)
-                        if abs_path:
-                            rel_path = self.file_manager._get_rel_path(abs_path)
-                            if rel_path in self.file_manager.get_files():
-                                self.write_history_func("tool", f"Added {rel_path} to the chat.")
+            patterns_or_literals_raw = re.findall(r"\"(.+?)\"|(\S+)", args_str)
+            patterns_or_literals = [name for sublist in patterns_or_literals_raw for name in sublist if name]
+            if not patterns_or_literals:
+                self.logger.error('Usage: /add <file_or_pattern1> ["file_or_pattern 2"] ...')
+                return True, None
+
+            base_path = self.file_manager.root if self.file_manager.root else Path.cwd()
+            
+            for p_or_l_arg in patterns_or_literals:
+                # Attempt to glob using the argument
+                matched_abs_paths = list(base_path.glob(p_or_l_arg))
+                
+                files_added_by_glob = 0
+                if matched_abs_paths: # Glob pattern yielded some results
+                    self.logger.info(f"Pattern '{p_or_l_arg}' matched {len(matched_abs_paths)} item(s).")
+                    for abs_path_match in matched_abs_paths:
+                        if abs_path_match.is_file():
+                            # Pass the absolute path string to file_manager
+                            if self.file_manager.add_file(str(abs_path_match)): # add_file handles its own logging
+                                files_added_by_glob += 1
+                                # For history, get the relative path
+                                rel_path = self.file_manager._get_rel_path(abs_path_match)
+                                self.write_history_func("tool", f"Added {rel_path} to the chat (matched by glob '{p_or_l_arg}').")
+                        elif abs_path_match.is_dir():
+                            rel_path_dir = self.file_manager._get_rel_path(abs_path_match)
+                            self.logger.info(f"Pattern '{p_or_l_arg}' matched directory '{rel_path_dir}'. Directories are not added directly. Use e.g. '{p_or_l_arg}/*' or similar for files inside.")
+                        # Other types (symlinks to files, etc.) will be handled by add_file's validation
+                
+                # Fallback to literal if:
+                # 1. Glob pattern yielded no results (matched_abs_paths is empty)
+                # OR
+                # 2. Glob pattern yielded results, but none of them were files that got successfully added.
+                if not matched_abs_paths or files_added_by_glob == 0:
+                    if not matched_abs_paths: 
+                        self.logger.debug(f"Pattern '{p_or_l_arg}' matched no items. Treating as a literal file name.")
+                    # else: # Glob matched something (e.g. dir), but no files were added from it. We can still try it as a literal.
+                    #    self.logger.debug(f"Glob pattern '{p_or_l_arg}' matched items, but no files were added from it. Trying as literal.")
+                    
+                    if self.file_manager.add_file(p_or_l_arg): # add_file handles its own logging
+                        # For history, need to resolve the literal path to its relative form
+                        abs_path_literal = self.file_manager.get_abs_path(p_or_l_arg)
+                        if abs_path_literal: # Should be true if add_file succeeded
+                            rel_path = self.file_manager._get_rel_path(abs_path_literal)
+                            self.write_history_func("tool", f"Added {rel_path} to the chat (literal path).")
             return True, None
 
         elif command == "/drop":
-            filenames = re.findall(r"\"(.+?)\"|(\S+)", args_str)
-            filenames = [name for sublist in filenames for name in sublist if name]
-            if not filenames:
-                self.logger.error('Usage: /drop <file1> ["file 2"] ...')
-            else:
-                initial_fnames = set(self.file_manager.get_files())
-                for fname in filenames:
-                    self.file_manager.drop_file(fname)
-                dropped_fnames = initial_fnames - self.file_manager.get_files()
-                for fname in dropped_fnames:
-                    self.write_history_func("tool", f"Removed {fname} from the chat.")
+            patterns_or_literals_raw = re.findall(r"\"(.+?)\"|(\S+)", args_str)
+            patterns_or_literals = [name for sublist in patterns_or_literals_raw for name in sublist if name]
+            if not patterns_or_literals:
+                self.logger.error('Usage: /drop <file_or_pattern1> ["file_or_pattern 2"] ...')
+                return True, None
+
+            base_path = self.file_manager.root if self.file_manager.root else Path.cwd()
+            initial_fnames_in_context = set(self.file_manager.get_files())
+            
+            # Keep track of files already dropped by a glob in this command to avoid reprocessing literals
+            files_dropped_by_glob_in_this_command_call = set() # Stores relative paths
+
+            for p_or_l_arg in patterns_or_literals:
+                matched_abs_paths = list(base_path.glob(p_or_l_arg))
+                
+                processed_by_glob_this_arg = False
+                if matched_abs_paths:
+                    self.logger.info(f"Pattern '{p_or_l_arg}' matched {len(matched_abs_paths)} item(s) for potential dropping.")
+                    for abs_path_match in matched_abs_paths:
+                        if abs_path_match.is_file():
+                            rel_path_match = self.file_manager._get_rel_path(abs_path_match)
+                            # Only attempt to drop if it was in context initially
+                            if rel_path_match in initial_fnames_in_context:
+                                # drop_file takes str path, handles logging and actual removal from fnames
+                                self.file_manager.drop_file(str(abs_path_match)) 
+                                files_dropped_by_glob_in_this_command_call.add(rel_path_match)
+                                processed_by_glob_this_arg = True
+                
+                if not matched_abs_paths or not processed_by_glob_this_arg:
+                    if not matched_abs_paths:
+                        self.logger.debug(f"Pattern '{p_or_l_arg}' matched no items for dropping. Treating as a literal file name.")
+                    # else: # Glob matched, but no files in context were actioned by it. Try as literal.
+                    #    self.logger.debug(f"Glob pattern '{p_or_l_arg}' matched items, but no relevant files were dropped. Trying as literal.")
+
+                    # Before trying as literal, ensure it wasn't already dropped by a previous glob in *this* command call
+                    potential_literal_abs_path = self.file_manager.get_abs_path(p_or_l_arg)
+                    should_process_literal = True
+                    if potential_literal_abs_path:
+                        potential_literal_rel_path = self.file_manager._get_rel_path(potential_literal_abs_path)
+                        if potential_literal_rel_path in files_dropped_by_glob_in_this_command_call:
+                            should_process_literal = False
+                    
+                    if should_process_literal:
+                        self.file_manager.drop_file(p_or_l_arg) # drop_file handles logging
+
+            # History for /drop is based on overall set difference
+            dropped_fnames_overall = initial_fnames_in_context - self.file_manager.get_files()
+            if dropped_fnames_overall:
+                 self.write_history_func("tool", f"Removed {len(dropped_fnames_overall)} file(s) from the chat: {', '.join(sorted(list(dropped_fnames_overall)))}")
+            elif patterns_or_literals: # Arguments were given, but nothing was actually removed
+                self.logger.info("No files matching the arguments were found in the current chat context to drop.")
             return True, None
 
         elif command == "/clear":
