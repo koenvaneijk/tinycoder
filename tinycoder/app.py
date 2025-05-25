@@ -685,10 +685,11 @@ class App:
         if not requested_files_from_llm:
             return False
 
-        self.logger.info(f"LLM requested the following files for context: {', '.join(requested_files_from_llm)}")
+        self.logger.info(f"{STYLES['BOLD']}LLM requested additional file context.{RESET}")
         
         valid_files_to_potentially_add = []
-        non_existent_files_logged = []
+        non_existent_files_requested = []
+        already_in_context_files = []
 
         for fname_rel in requested_files_from_llm:
             abs_path = self.file_manager.get_abs_path(fname_rel)
@@ -696,23 +697,40 @@ class App:
                 if fname_rel not in self.file_manager.get_files():
                      valid_files_to_potentially_add.append(fname_rel)
                 else:
-                    self.logger.info(f"File '{fname_rel}' requested by LLM is already in context.")
+                    already_in_context_files.append(fname_rel)
             else:
-                non_existent_files_logged.append(fname_rel)
+                non_existent_files_requested.append(fname_rel)
 
-        if non_existent_files_logged:
+        if non_existent_files_requested:
+            formatted_non_existent = [f"{FmtColors['RED']}{fname}{RESET}" for fname in non_existent_files_requested]
             self.logger.warning(
-                f"LLM requested some files that do not exist or could not be found: {', '.join(non_existent_files_logged)}"
+                f"LLM requested non-existent files: {', '.join(formatted_non_existent)}"
+            )
+        
+        if already_in_context_files:
+            formatted_already_in_context = [f"{FmtColors['GREY']}{fname}{RESET}" for fname in already_in_context_files]
+            self.logger.info(
+                f"Requested files already in context: {', '.join(formatted_already_in_context)}"
             )
 
         if not valid_files_to_potentially_add:
-            if requested_files_from_llm: 
-                self.logger.info("No new, existing files to add from LLM's request.")
+            # This covers the case where all requested files were either non-existent or already in context.
+            # The messages above would have informed the user.
+            if requested_files_from_llm and not non_existent_files_requested and not already_in_context_files:
+                # This case should ideally not be hit if logic is correct,
+                # but as a fallback if all files requested were valid but somehow not new.
+                self.logger.info("LLM requested files, but none are new and existing to add.")
+            elif not requested_files_from_llm: # Should be caught by the first check, but for completeness.
+                 pass # No request made initially.
+            else:
+                 # Info/warnings about non-existent or already-in-context files have been printed.
+                 # If there are no *new* files to add, we can inform.
+                 self.logger.info("No new, existing files to add from LLM's request.")
             return False
 
-        self.logger.info("The LLM has requested the following existing files to be added to the context:")
+        self.logger.info(f"{FmtColors['BLUE']}LLM suggests adding these existing files to context:{RESET}")
         for i, fname in enumerate(valid_files_to_potentially_add):
-            self.logger.info(f"  {i+1}. {fname}")
+            self.logger.info(f"  {i+1}. {FmtColors['CYAN']}{fname}{RESET}")
         
         try:
             confirm_prompt = "Add these files to context? (y/N, or list indices like '1,3'): "
@@ -1050,7 +1068,7 @@ class App:
 
             num_reflections += 1
             self.logger.info(
-                f"Reflection {num_reflections}: Sending feedback to LLM..."
+                f"Reflection {num_reflections}/{max_reflections}: Sending feedback to LLM..."
             )
             message = (
                 self.reflected_message
