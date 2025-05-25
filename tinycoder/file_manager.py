@@ -95,8 +95,11 @@ class FileManager:
             # Note: History writing is handled by the caller (tinycoder)
             return True  # Successfully added
 
-    def drop_file(self, fname: str):
-        """Removes a file from the chat context by its relative or absolute path."""
+    def drop_file(self, fname: str) -> bool:
+        """
+        Removes a file from the chat context by its relative or absolute path.
+        Returns True if successfully removed, False otherwise.
+        """
         path_to_remove = None
         # Check if the exact string provided is in fnames (could be relative or absolute if outside root)
         if fname in self.fnames:
@@ -113,8 +116,10 @@ class FileManager:
             self.fnames.remove(path_to_remove)
             self.logger.info(f"Removed {path_to_remove} from the chat context.")
             # Note: History writing is handled by the caller (tinycoder)
+            return True # Successfully removed
         else:
             self.logger.error(f"File {fname} not found in chat context for removal.")
+            return False # Not found or other error
 
     def get_files(self) -> Set[str]:
         """Returns the set of relative file paths currently in the chat."""

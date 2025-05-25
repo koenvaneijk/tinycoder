@@ -120,10 +120,16 @@ class CommandHandler:
                                 files_added_by_glob += 1
                                 # For history, get the relative path
                                 rel_path = self.file_manager._get_rel_path(abs_path_match)
-                                self.write_history_func("tool", f"Added {rel_path} to the chat (matched by glob '{p_or_l_arg}').")
+                                self.write_history_func("tool", f"Added {rel_path} to the chat (file matched by glob '{p_or_l_arg}').")
                         elif abs_path_match.is_dir():
                             rel_path_dir = self.file_manager._get_rel_path(abs_path_match)
-                            self.logger.info(f"Pattern '{p_or_l_arg}' matched directory '{rel_path_dir}'. Directories are not added directly. Use e.g. '{p_or_l_arg}/*' or similar for files inside.")
+                            self.logger.info(f"Pattern '{p_or_l_arg}' matched directory '{rel_path_dir}'. Recursively adding files from it.")
+                            for sub_file_path in abs_path_match.rglob('*'): # rglob for recursive
+                                if sub_file_path.is_file():
+                                    if self.file_manager.add_file(str(sub_file_path)):
+                                        files_added_by_glob += 1
+                                        rel_sub_file_path = self.file_manager._get_rel_path(sub_file_path)
+                                        self.write_history_func("tool", f"Added {rel_sub_file_path} (from dir '{rel_path_dir}' matched by '{p_or_l_arg}').")
                         # Other types (symlinks to files, etc.) will be handled by add_file's validation
                 
                 # Fallback to literal if:
@@ -169,9 +175,19 @@ class CommandHandler:
                             # Only attempt to drop if it was in context initially
                             if rel_path_match in initial_fnames_in_context:
                                 # drop_file takes str path, handles logging and actual removal from fnames
-                                self.file_manager.drop_file(str(abs_path_match)) 
-                                files_dropped_by_glob_in_this_command_call.add(rel_path_match)
-                                processed_by_glob_this_arg = True
+                                if self.file_manager.drop_file(str(abs_path_match)):
+                                    files_dropped_by_glob_in_this_command_call.add(rel_path_match)
+                                    processed_by_glob_this_arg = True
+                        elif abs_path_match.is_dir():
+                            rel_path_dir = self.file_manager._get_rel_path(abs_path_match)
+                            self.logger.info(f"Pattern '{p_or_l_arg}' matched directory '{rel_path_dir}'. Recursively dropping files from it if in context.")
+                            for sub_file_path in abs_path_match.rglob('*'):
+                                if sub_file_path.is_file():
+                                    rel_sub_file_path = self.file_manager._get_rel_path(sub_file_path)
+                                    if rel_sub_file_path in initial_fnames_in_context:
+                                        if self.file_manager.drop_file(str(sub_file_path)):
+                                           files_dropped_by_glob_in_this_command_call.add(rel_sub_file_path)
+                                           processed_by_glob_this_arg = True
                 
                 if not matched_abs_paths or not processed_by_glob_this_arg:
                     if not matched_abs_paths:
