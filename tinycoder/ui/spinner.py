@@ -67,7 +67,7 @@ class Spinner:
             )  # Wait briefly for thread to finish
 
         # Clear the line completely after stopping (message + space + spinner char)
-        sys.stdout.write("\r" + " " * (len(self.message) + 2) + "\r")
+        sys.stdout.write("\r" + " " * (len(self.message) + 3) + "\r")
         sys.stdout.flush()
         self._thread = None  # Reset thread
 

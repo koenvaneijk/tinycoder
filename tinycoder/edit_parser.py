@@ -1,15 +1,18 @@
 import re
-from typing import List, Tuple
+from typing import List, Tuple, Dict, Any # Added Dict, Any
 import logging
 
 class EditParser:
-    """Parses LLM responses to extract structured edit blocks in the new XML format."""
+    """
+    Parses LLM responses to extract structured edit blocks in the XML format
+    and <request_files> blocks.
+    """
 
     def __init__(self):
         """Initializes the EditParser."""
         self.logger = logging.getLogger(__name__)
 
-        # Regex patterns for the new XML structure
+        # Regex patterns for the XML structures
         # Using non-greedy matching (.*?) and DOTALL (s) flag
         
         # Captures the path attribute and the content inside <edit>
@@ -24,10 +27,24 @@ class EditParser:
         self.new_code_pattern = re.compile(
             r"<new_code>([\s\S]*?)</new_code>", re.DOTALL
         )
+        # Captures content inside <request_files>
+        self.request_files_pattern = re.compile(
+            r"<request_files>([\s\S]*?)</request_files>", re.DOTALL
+        )
 
-    def parse(self, response: str) -> List[Tuple[str, str, str]]:
-        """Parses XML-structured edit blocks from the LLM response."""
-        edits = []
+
+    def parse(self, response: str) -> Dict[str, Any]:
+        """
+        Parses LLM responses to extract structured edit blocks in the XML format
+        and <request_files> blocks.
+
+        Returns:
+            A dictionary with two keys:
+            - "edits": A list of tuples, where each tuple is (path, old_code, new_code).
+            - "requested_files": A list of file path strings.
+        """
+        edits: List[Tuple[str, str, str]] = []
+        requested_files: List[str] = []
 
         # Find all <edit path="..."> blocks in the response
         for edit_tag_match in self.edit_tag_pattern.finditer(response):
@@ -46,29 +63,55 @@ class EditParser:
             old_code_match = self.old_code_pattern.search(edit_tag_content)
             if old_code_match:
                 # Strip leading/trailing whitespace AFTER extraction
-                old_code = old_code_match.group(1).strip()
+                old_code_content = old_code_match.group(1)
+                # Preserve leading/trailing newlines if they are the *only* content
+                if old_code_content.strip() == "":
+                    old_code = old_code_content # Keep as is (e.g. "\n\n")
+                else: # Strip if there's other non-whitespace content
+                    old_code = old_code_content.strip()
+
 
             new_code = ""  # Initialize
             new_code_match = self.new_code_pattern.search(edit_tag_content)
             if new_code_match:
                 # Strip leading/trailing whitespace AFTER extraction
-                new_code = new_code_match.group(1).strip()
+                new_code_content = new_code_match.group(1)
+                if new_code_content.strip() == "":
+                    new_code = new_code_content
+                else:
+                    new_code = new_code_content.strip()
             
             # Normalize line endings
             old_code = old_code.replace("\r\n", "\n")
             new_code = new_code.replace("\r\n", "\n")
 
             # Append the extracted edit to the list
-            # Skip edits that are effectively empty (both old and new code are empty)
+            # Skip edits that are effectively empty (both old and new code are empty *after stripping*)
             if old_code == "" and new_code == "":
                 self.logger.warning(
-                    f"Skipping edit for file '{path_attr}' because both <old_code> and <new_code> are empty."
+                    f"Skipping edit for file '{path_attr}' because both <old_code> and <new_code> are effectively empty."
                 )
                 continue
 
             edits.append((path_attr, old_code, new_code))
 
-        return edits
+        # Find <request_files> block
+        request_match = self.request_files_pattern.search(response)
+        if request_match:
+            files_text = request_match.group(1).strip()
+            if files_text:
+                # Split by newline and filter out empty strings after stripping each line
+                requested_files.extend([f.strip() for f in files_text.splitlines() if f.strip()])
+        
+        if requested_files and edits:
+            self.logger.warning("LLM response contains both <request_files> and <edit> tags. "
+                                "Prioritizing file request as per standard instructions.")
+            # Note: The app.py logic will handle whether to process edits if files are requested.
+            # For strictness, one might clear `edits` here:
+            # edits = []
+
+
+        return {"edits": edits, "requested_files": requested_files}
 
 if __name__ == '__main__':
     # Example usage (requires logging setup to see warnings)

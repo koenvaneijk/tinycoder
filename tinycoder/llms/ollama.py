@@ -7,7 +7,7 @@ from typing import List, Dict, Optional, Tuple, Any
 from tinycoder.llms.base import LLMClient
 
 # Default model - can be overridden by constructor or --model arg
-DEFAULT_OLLAMA_MODEL = "qwen3:14b"
+DEFAULT_OLLAMA_MODEL = "qwen3:30b"
 # Default host - can be overridden by OLLAMA_HOST env var
 DEFAULT_OLLAMA_HOST = "http://localhost:11434"
 

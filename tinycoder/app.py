@@ -573,9 +573,9 @@ class App:
                 # Format for display if in ask mode and not an edit block
                 if self.mode == "ask" and response_content and not response_content.strip().startswith("<"):
                     display_response = self._format_markdown_for_terminal(response_content)
-                    self.logger.info("ASSISTANT: " + display_response)
+                    self.logger.info(f"\n{FmtColors['CYAN']}{STYLES['BOLD']}ASSISTANT{RESET}:\n" + display_response + "\n")
                 else:
-                    self.logger.info("ASSISTANT: " + response_content)
+                    self.logger.info(f"\n{FmtColors['CYAN']}{STYLES['BOLD']}ASSISTANT{RESET}:\n" + response_content + "\n")
                 
                 n_tokens = len(response_content)/4 # Based on raw response
                 self.logger.debug("Approx. response tokens: %d", n_tokens) # Changed to debug

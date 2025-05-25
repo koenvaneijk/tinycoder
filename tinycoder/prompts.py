@@ -11,6 +11,17 @@ The user will provide the current content of the files relevant to their questio
 Your task is to answer the user's questions accurately and helpfully, and you can use the information made available to you (the file contents and repository map).
 
 Don't provide any code edits or modifications in your response. You can include some small code snippets wrapped in triple backticks, but only if they are relevant to the user's question.
+
+Important: If the user has not provided the necessary context or files needed to answer the user's question, inform the user that you need the relevant file contents to answer their question.
+To do this, use the following format:
+
+```xml
+<request_files>
+./path/to/required_file.py
+./another_required_file.py
+</request_files>
+```
+
 """
 
 
@@ -143,7 +154,18 @@ def old_deprecated_function():
 <new_code>
 </new_code>
 </edit>
-```'''
+```
+
+Important: If the user has not provided the necessary context or files, you must not output any code edits. Instead, inform the user that you need the relevant file contents to proceed with the modifications.
+To do this, use the following format:
+
+```xml
+<request_files>
+./path/to/required_file.py
+./another_required_file.py
+</request_files>
+```
+'''
 
 IDENTIFY_FILES_PROMPT = """You are an expert programmer assisting a user. The user has provided a coding instruction but has not specified which files to edit. Based on the user's instruction and the repository structure provided below, identify the most likely file paths relative to the project root that need modification.
 

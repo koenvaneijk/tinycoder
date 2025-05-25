@@ -6,8 +6,7 @@ from typing import List, Dict, Optional, Tuple, Any
 import tinycoder.requests as requests # Use the local requests shim
 from tinycoder.llms.base import LLMClient
 
-# Recommended default model (Sonnet 3.5 is a strong, cost-effective choice)
-DEFAULT_ANTHROPIC_MODEL = "claude-3-7-sonnet-20250219"
+DEFAULT_ANTHROPIC_MODEL = "claude-opus-4-20250514"
 ANTHROPIC_API_ENDPOINT = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_API_VERSION = "2023-06-01"
 ANTHROPIC_API_KEY_ENV_VAR = "ANTHROPIC_API_KEY"
@@ -115,7 +114,7 @@ class AnthropicClient(LLMClient):
 
         try:
             response = requests.post(
-                self.api_url, headers=self.headers, json=payload, timeout=180
+                self.api_url, headers=self.headers, json=payload, timeout=600
             )
             response.raise_for_status() # Check for HTTP 4xx/5xx errors
 

@@ -9,7 +9,7 @@ from tinycoder.llms.base import LLMClient  # Import the base class
 
 # --- Constants and Setup ---
 API_URL = "https://api.deepseek.com/chat/completions"
-DEFAULT_DEEPSEEK_MODEL = "deepseek-chat"  # Default model for DeepSeek
+DEFAULT_DEEPSEEK_MODEL = "deepseek-reasoner"  # Default model for DeepSeek
 
 logger = logging.getLogger(__name__)
 
