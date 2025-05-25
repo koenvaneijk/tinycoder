@@ -675,40 +675,128 @@ class App:
                 "tool", f"Undid commit {last_hash}"
             )
 
-    def process_user_input(self):
-        """Processes the latest user input (already in history), sends to LLM, handles response."""
-        # Note: is_command_context is removed as this function no longer handles commands directly
-        response = self._send_to_llm()
+    def _handle_llm_file_requests(self, requested_files_from_llm: List[str]) -> bool:
+        """
+        Handles LLM's request for additional files.
+        Checks existence, prompts user, adds files, and sets up reflection.
+        Returns True if a reflection message was set (meaning files were added or action taken
+        that requires an LLM follow-up), False otherwise.
+        """
+        if not requested_files_from_llm:
+            return False
 
-        # Mode reversion is handled in run_one after this function returns
-        if response:
-            self.history_manager.add_message(
-                "assistant", response
+        self.logger.info(f"LLM requested the following files for context: {', '.join(requested_files_from_llm)}")
+        
+        valid_files_to_potentially_add = []
+        non_existent_files_logged = []
+
+        for fname_rel in requested_files_from_llm:
+            abs_path = self.file_manager.get_abs_path(fname_rel)
+            if abs_path and abs_path.exists():
+                if fname_rel not in self.file_manager.get_files():
+                     valid_files_to_potentially_add.append(fname_rel)
+                else:
+                    self.logger.info(f"File '{fname_rel}' requested by LLM is already in context.")
+            else:
+                non_existent_files_logged.append(fname_rel)
+
+        if non_existent_files_logged:
+            self.logger.warning(
+                f"LLM requested some files that do not exist or could not be found: {', '.join(non_existent_files_logged)}"
             )
 
-            # Only try to parse and apply edits if in code mode
-            if self.mode == "code":
-                edits = self.edit_parser.parse(response)
+        if not valid_files_to_potentially_add:
+            if requested_files_from_llm: 
+                self.logger.info("No new, existing files to add from LLM's request.")
+            return False
+
+        self.logger.info("The LLM has requested the following existing files to be added to the context:")
+        for i, fname in enumerate(valid_files_to_potentially_add):
+            self.logger.info(f"  {i+1}. {fname}")
+        
+        try:
+            confirm_prompt = "Add these files to context? (y/N, or list indices like '1,3'): "
+            confirm = input(confirm_prompt).strip().lower()
+        except EOFError:
+            confirm = "n"
+            print() 
+        except KeyboardInterrupt:
+            self.logger.info("\nFile addition (from LLM request) cancelled by user.")
+            self.reflected_message = "User cancelled the addition of requested files. Please advise on how to proceed or if you can continue without them."
+            return True
+
+        files_to_add_confirmed = []
+        if confirm == 'y':
+            files_to_add_confirmed = valid_files_to_potentially_add
+        elif confirm and confirm != 'n':
+            try:
+                indices_to_add = [int(x.strip()) - 1 for x in confirm.split(',') if x.strip().isdigit()]
+                files_to_add_confirmed = [valid_files_to_potentially_add[i] for i in indices_to_add if 0 <= i < len(valid_files_to_potentially_add)]
+            except (ValueError, IndexError):
+                self.logger.warning("Invalid selection. No files will be added from LLM request.")
+
+        if files_to_add_confirmed:
+            added_count = 0
+            successfully_added_fnames = []
+            for fname in files_to_add_confirmed:
+                if self.file_manager.add_file(fname): 
+                    added_count += 1
+                    successfully_added_fnames.append(fname)
+            
+            if added_count > 0:
+                tool_message = f"Added {added_count} file(s) to context from LLM request: {', '.join(successfully_added_fnames)}"
+                self.history_manager.save_message_to_file_only("tool", tool_message)
+                reflection_content = (
+                    f"The following files have been added to the context as per your request: {', '.join(successfully_added_fnames)}. "
+                    "Please proceed with the original task based on the updated context."
+                )
+                self.reflected_message = reflection_content
+                return True
+            else:
+                self.logger.info("No files were ultimately added from LLM's request despite confirmation.")
+        else: 
+            self.logger.info("User chose not to add files requested by LLM, or selection was invalid.")
+            self.reflected_message = "User declined to add the requested files. Please advise on how to proceed or if you can continue without them."
+            return True
+
+        return False
+
+    def process_user_input(self):
+        """Processes the latest user input (already in history), sends to LLM, handles response."""
+        response = self._send_to_llm()
+
+        if response:
+            self.history_manager.add_message("assistant", response)
+            
+            # Assuming edit_parser.parse now returns a dict: {"edits": [...], "requested_files": [...]}
+            parsed_llm_output = self.edit_parser.parse(response)
+            edits = parsed_llm_output.get("edits", [])
+            requested_files = parsed_llm_output.get("requested_files", [])
+
+            # --- Handle File Requests First ---
+            if requested_files:
+                if self._handle_llm_file_requests(requested_files):
+                    # A reflection message is set (e.g., files added, user cancelled).
+                    # The run_one loop will pick this up. We are done for this turn.
+                    return 
+                # If it returns False, it means no new files were added to prompt reflection,
+                # so we can potentially proceed to edits if any were also sent.
+
+            # --- Process Edits (only if not already handling a file request reflection and in code mode) ---
+            if not self.reflected_message and self.mode == "code":
                 if edits:
-                    # MODIFIED: Unpack new return values from apply_edits
                     all_succeeded, failed_indices, modified_files, lint_errors = (
                         self.code_applier.apply_edits(edits)
                     )
-                    self.lint_errors_found = (
-                        lint_errors  # Update App state for lint errors regardless
-                    )
+                    self.lint_errors_found = lint_errors 
 
                     if all_succeeded:
-                        # All edits processed successfully (though maybe no changes occurred)
                         if modified_files:
                             self.logger.info("All edits applied successfully.")
-                            self._git_add_commit(
-                                list(modified_files)
-                            )  # Commit only the modified files
+                            self._git_add_commit(list(modified_files))
                         else:
                             self.logger.info("Edits processed, but no files were changed.")
                     elif failed_indices:
-                        # Some edits failed
                         failed_indices_str = ", ".join(map(str, sorted(failed_indices)))
                         error_message = (
                             f"Some edits failed to apply. No changes have been committed.\n"
@@ -718,15 +806,14 @@ class App:
                             f"but you should provide corrections for the failed ones before proceeding."
                         )
                         self.logger.error(error_message)
-                        self.reflected_message = (error_message)
-                        # DO NOT COMMIT
-                    # else: # This case (not all_succeeded and not failed_indices) shouldn't happen
+                        self.reflected_message = error_message 
+                    
+                else:  # No edits found by parser (and no file requests were actioned to cause reflection)
+                    self.logger.info("No actionable edit blocks found in the response.")
 
-                else:  # No edits found by parser
-                    self.logger.info("No edit blocks found in the response.")
-
-                # --- Check for Lint Errors ---
-                if self.lint_errors_found:
+                # --- Check for Lint Errors (related to edits) ---
+                # Only trigger lint reflection if no other more critical reflection (like edit failure) is already set.
+                if self.lint_errors_found and not self.reflected_message: 
                     error_messages = ["Found syntax errors after applying edits:"]
                     for fname, error in self.lint_errors_found.items():
                         error_messages.append(f"\n--- Errors in {fname} ---\n{error}")
@@ -736,11 +823,9 @@ class App:
                     ring_bell()
                     fix_lint = input("Attempt to fix lint errors? (y/N): ")
                     if fix_lint.lower() == "y":
-                        self.reflected_message = (
-                            combined_errors  # Set message for next LLM call
-                        )
-                        # The loop in run_one will handle sending this reflected message
-                    # else: lint errors are ignored for this round
+                        self.reflected_message = combined_errors
+            
+        # Mode reversion (if any) is handled in run_one after this function returns
 
     def _ask_llm_for_files(self, instruction: str) -> List[str]:
         """Asks the LLM to identify files needed for a given instruction."""
