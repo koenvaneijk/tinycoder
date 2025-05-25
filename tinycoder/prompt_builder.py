@@ -68,8 +68,10 @@ class PromptBuilder:
                 combined_prompt += "\n\n## Custom Rules\n\n" + custom_rules_content
             return combined_prompt
         else:  # ask mode
-            # Ask mode does not use DIFF_PROMPT or custom rules directly in base
-            # If custom rules are needed for Ask, they should be part of ASK_PROMPT template
+            # Ask mode does not use DIFF_PROMPT or custom rules directly in base.
+            # If custom rules are needed for Ask, they should be part of ASK_PROMPT template.
+            # If ASK_PROMPT (as modified by the user) now contains instructions for <request_files>,
+            # this function correctly returns that as the system prompt for "ask" mode.
             return base
 
     def build_identify_files_prompt(self, include_map: bool) -> str:
