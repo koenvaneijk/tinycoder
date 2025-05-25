@@ -32,6 +32,31 @@ BRIGHT_COLORS = {
     "BRIGHT_WHITE": "\033[97m",
 }
 
+# Standard background colors
+BG_COLORS = {
+    "BLACK_BG": "\033[40m",
+    "RED_BG": "\033[41m",
+    "GREEN_BG": "\033[42m",
+    "YELLOW_BG": "\033[43m",
+    "BLUE_BG": "\033[44m",
+    "MAGENTA_BG": "\033[45m",
+    "CYAN_BG": "\033[46m",
+    "WHITE_BG": "\033[47m",
+    "GREY_BG": "\033[100m", # Bright Black background
+}
+
+# Bright background colors
+BRIGHT_BG_COLORS = {
+    "BRIGHT_BLACK_BG": "\033[100m",
+    "BRIGHT_RED_BG": "\033[101m",
+    "BRIGHT_GREEN_BG": "\033[102m",
+    "BRIGHT_YELLOW_BG": "\033[103m",
+    "BRIGHT_BLUE_BG": "\033[104m",
+    "BRIGHT_MAGENTA_BG": "\033[105m",
+    "BRIGHT_CYAN_BG": "\033[106m",
+    "BRIGHT_WHITE_BG": "\033[107m",
+}
+
 # Styles
 STYLES = {
     "BOLD": "\033[1m",
