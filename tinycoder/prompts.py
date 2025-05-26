@@ -57,7 +57,7 @@ A contiguous chunk of lines to search for in the existing source code. This shou
 </old_code>
 <new_code>
 The lines to replace into the source code
-</new_code>>
+</new_code>
 </edit>
 ```
 
@@ -128,6 +128,7 @@ def helper_function(data):
     """New and improved logic."""
     return data * 2
 </new_code>
+</edit>
 
 <edit path="./my_project/utils.py">
 <old_code>
