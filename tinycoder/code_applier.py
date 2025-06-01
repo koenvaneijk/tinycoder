@@ -77,15 +77,15 @@ class CodeApplier:
               original or partially modified content if applicable).
         """
         failed_edits_indices: List[int] = []
-        original_file_content: Dict[str, Optional[str]] = {}
-        edited_file_content: Dict[str, str] = {}
-        touched_files: Set[str] = set()
-        files_created_in_this_run: Set[str] = set()
+        original_file_content: Dict[str, Optional[str]] = {} # Stores content as read from disk at start of this batch
+        edited_file_content: Dict[str, str] = {} # Stores in-memory state of files as edits are applied
+        touched_files: Set[str] = set() # Files mentioned in edit instructions or added
+        files_created_in_this_run: Set[str] = set() # Files treated as new creations in this batch
         lint_errors_found: Dict[str, str] = {}
         write_failed = False
 
         for i, (fname, search_block, replace_block) in enumerate(edits):
-            edit_failed_this_iteration = False  # Flag for this specific edit block
+            edit_failed_this_iteration = False
             abs_path = self.file_manager.get_abs_path(fname)
             if not abs_path:
                 failed_edits_indices.append(i + 1)
@@ -97,115 +97,127 @@ class CodeApplier:
                 failed_edits_indices.append(i + 1)
                 continue
 
-            # --- Context Check & Initial Read ---
+            # --- Context Check & Initial Read for this edit iteration ---
             if (
                 rel_path not in self.file_manager.get_files()
-                and rel_path not in touched_files
+                and rel_path not in touched_files # Check if touched earlier in *this specific batch*
             ):
-                # If not in context AND not already touched in this run, ask user
                 confirm = self.input_func(
                     f"LLM wants to edit '{rel_path}' which is not in the chat. Allow? (y/N): "
                 )
                 if confirm.lower() == "y":
-                    if not self.file_manager.add_file(fname):
-                        self.logger.error(f"Could not add '{fname}' for editing.")
+                    if not self.file_manager.add_file(fname): # Adds to FileManager's context
+                        self.logger.error(f"Could not add '{fname}' to context for editing.")
                         failed_edits_indices.append(i + 1)
                         continue
                 else:
-                    self.logger.error(f"Skipping edit for {fname}.")
+                    self.logger.error(f"Skipping edit for {fname} as user declined.")
                     failed_edits_indices.append(i + 1)
                     continue
+            
+            touched_files.add(rel_path)
 
-            touched_files.add(rel_path)  # Mark as touched regardless of outcome
-
-            # Read and cache original content only if not already done in this run
+            # Read and cache original disk content ONCE per file for this batch
             if rel_path not in original_file_content:
-                content = self.file_manager.read_file(abs_path)
-                # Store original content (None if it doesn't exist/unreadable)
-                original_file_content[rel_path] = content
-                if content is not None:
-                    # If readable, cache its normalized version as the starting point for edits
-                    edited_file_content[rel_path] = content.replace("\r\n", "\n")
-                # If content is None (new/unreadable), edited_file_content will be populated
-                # either by creation logic or potentially error out if read fails later.
+                disk_content = self.file_manager.read_file(abs_path)
+                original_file_content[rel_path] = disk_content
+                # Initialize edited_file_content with disk content if it exists, otherwise empty string for new files
+                edited_file_content[rel_path] = disk_content.replace("\r\n", "\n") if disk_content is not None else ""
 
-            # --- Get Current Content for this Edit ---
-            # Use cached content if available, otherwise start fresh (applies to new files)
+            # --- Get Current Content (from previous edits in this batch) & Normalize Search/Replace Blocks ---
             current_content_normalized = edited_file_content.get(rel_path, "")
-            original_exists = original_file_content.get(rel_path) is not None
-            original_is_empty = (
-                original_exists and original_file_content[rel_path] == ""
-            )
+            
+            original_exists_on_disk = original_file_content.get(rel_path) is not None
 
-            search_is_empty = search_block == ""
-            is_creation_attempt = not original_exists or (
-                search_is_empty and original_is_empty
-            )
+            search_block_normalized = search_block.replace("\r\n", "\n")
+            replace_block_normalized = replace_block.replace("\r\n", "\n")
 
             # --- Apply Edit Logic (in memory) ---
             try:
                 new_content_normalized: Optional[str] = None
 
-                if is_creation_attempt and rel_path not in files_created_in_this_run:
-                    if search_block != "":
+                is_current_target_empty = (current_content_normalized == "")
+                is_search_effectively_empty = (search_block_normalized == "" or 
+                                               (search_block_normalized.strip() == "" and search_block_normalized != ""))
+
+                if is_current_target_empty and is_search_effectively_empty:
+                    # CASE 1: Current content is empty, and search block is empty or just whitespace (e.g., "\n").
+                    self.logger.info(
+                        f"Edit {i+1} for '{rel_path}': Target is empty and search block "
+                        f"({repr(search_block_normalized)}) is effectively empty. Setting content to replace_block."
+                    )
+                    new_content_normalized = replace_block_normalized
+                    
+                    if not original_exists_on_disk and rel_path not in files_created_in_this_run:
+                         files_created_in_this_run.add(rel_path)
+                         self.logger.info(
+                            f"--- Planning to create '{rel_path}' with content ---"
+                         )
+                         for line_content in replace_block_normalized.splitlines(): # Use splitlines() for proper iteration
+                             self.logger.info(f"{COLORS['GREEN']}+ {line_content}{RESET}")
+                         self.logger.info(f"--- End Plan ---")
+
+                elif search_block_normalized == "": 
+                    # CASE 2: Search block is truly empty (""), but current target is NOT empty. Prepend.
+                    new_content_normalized = (
+                        replace_block_normalized + current_content_normalized
+                    )
+                elif search_block_normalized in current_content_normalized:
+                    # CASE 3: Standard search and replace.
+                    if search_block_normalized.strip() == "" and search_block_normalized != "":
+                        occurrence_count = current_content_normalized.count(search_block_normalized)
+                        if occurrence_count > 1:
+                            self.logger.warning(
+                                f"Edit {i+1} for '{rel_path}': The search block {repr(search_block_normalized)} "
+                                f"consists only of whitespace/newlines and appears {occurrence_count} times. "
+                                f"The edit will target the *first* occurrence."
+                            )
+                    new_content_normalized = current_content_normalized.replace(
+                        search_block_normalized, replace_block_normalized, 1
+                    )
+                else:
+                    # CASE 4: Search block not found.
+                    search_preview = search_block_normalized.replace('\n', r'\n')[:50] + ('...' if len(search_block_normalized) > 50 else '')
+                    if not original_exists_on_disk and \
+                       rel_path not in files_created_in_this_run and \
+                       search_block_normalized != "" and \
+                       search_block_normalized.strip() != "":
                         self.logger.error(
-                            f"Edit {i+1}: Cannot use non-empty SEARCH block on non-existent/empty file '{rel_path}'. Skipping."
+                            f"Edit {i+1}: Cannot use non-empty, non-whitespace SEARCH block ({repr(search_preview)}) "
+                            f"on an initially non-existent file '{rel_path}'. Expected empty or whitespace-only search block for creation. Skipping."
                         )
-                        edit_failed_this_iteration = True
-                    else:
-                        replace_block_normalized = replace_block.replace("\r\n", "\n")
-                        self.logger.info(
-                            f"--- Planning to create/overwrite '{rel_path}' ---"
+                    else: 
+                        content_preview = current_content_normalized.replace('\n', r'\n')[:50] + ('...' if len(current_content_normalized) > 50 else '')
+                        self.logger.error(
+                            f"Edit {i+1}: SEARCH block ({repr(search_preview)}) not found exactly in current content of '{rel_path}'. "
+                            f"Content preview: ({repr(content_preview)}). Edit failed."
                         )
-                        for line in replace_block_normalized.splitlines():
-                            self.logger.info(f"{COLORS['GREEN']}+ {line}{RESET}")
-                        self.logger.info(f"--- End Plan ---")
+                    edit_failed_this_iteration = True
+
+                # --- Post-edit processing for this iteration ---
+                if not edit_failed_this_iteration and new_content_normalized is not None:
+                    if new_content_normalized != current_content_normalized:
+                        # Diff print conditions adjustment
+                        should_print_diff = True
+                        if is_current_target_empty and rel_path in files_created_in_this_run and not original_exists_on_disk:
+                             # This is a new file creation; the "Planning to create" log serves as the "diff"
+                             should_print_diff = False
                         
-                        new_content_normalized = replace_block_normalized
-                        edited_file_content[rel_path] = new_content_normalized
-                        files_created_in_this_run.add(rel_path)
-                        self.logger.info(
-                            f"Prepared edit {i+1} for creation of '{rel_path}'"
-                        )
-
-                elif not is_creation_attempt or rel_path in files_created_in_this_run:
-                    search_block_normalized = search_block.replace("\r\n", "\n")
-                    replace_block_normalized = replace_block.replace("\r\n", "\n")
-
-                    if search_is_empty:
-                        new_content_normalized = (
-                            replace_block_normalized + current_content_normalized
-                        )
-                    elif search_block_normalized in current_content_normalized:
-                        new_content_normalized = current_content_normalized.replace(
-                            search_block_normalized, replace_block_normalized, 1
-                        )
-                    else:
-                        self.logger.error(
-                            f"Edit {i+1}: SEARCH block not found exactly in '{rel_path}'. Edit failed."
-                        )
-                        edit_failed_this_iteration = True
-
-                    if (
-                        not edit_failed_this_iteration
-                        and new_content_normalized is not None
-                    ):
-                        if new_content_normalized != current_content_normalized:
+                        if should_print_diff:
                             self._print_diff(
                                 rel_path,
                                 current_content_normalized,
                                 new_content_normalized,
                             )
-                            edited_file_content[rel_path] = new_content_normalized
-                            self.logger.info(
-                                f"Prepared edit {i+1} for '{rel_path}'"
-                            )
-                        else:
-                            self.logger.info(
-                                f"Edit {i+1} for '{rel_path}' resulted in no changes to current state."
-                            )
-
-                # If this edit failed at any point, record its index
+                        edited_file_content[rel_path] = new_content_normalized # Update in-memory content
+                        self.logger.info(
+                            f"Prepared edit {i+1} for '{rel_path}'"
+                        )
+                    else:
+                        self.logger.info(
+                            f"Edit {i+1} for '{rel_path}' resulted in no changes to current state."
+                        )
+                
                 if edit_failed_this_iteration:
                     failed_edits_indices.append(i + 1)
 
@@ -215,8 +227,9 @@ class CodeApplier:
                 )
                 failed_edits_indices.append(i + 1)
 
-        modified_files: Set[str] = set()
-        for rel_path in touched_files:
+        # --- Write all modified files to disk and lint ---
+        modified_files_on_disk: Set[str] = set()
+        for rel_path in touched_files: # Iterate over all files that were involved in edits
             abs_path = self.file_manager.get_abs_path(rel_path)
             if not abs_path:
                 self.logger.error(
@@ -225,28 +238,28 @@ class CodeApplier:
                 write_failed = True
                 continue
 
-            final_content = edited_file_content.get(rel_path)
-            initial_content = original_file_content.get(rel_path)
-            initial_content_normalized = (
-                initial_content.replace("\r\n", "\n")
-                if initial_content is not None
+            final_content_in_memory = edited_file_content.get(rel_path)
+            initial_content_from_disk = original_file_content.get(rel_path)
+            
+            initial_content_from_disk_normalized = (
+                initial_content_from_disk.replace("\r\n", "\n")
+                if initial_content_from_disk is not None
                 else None
             )
 
             needs_write = False
-            if rel_path in files_created_in_this_run:
-                if final_content is not None:
+            if rel_path in files_created_in_this_run: # If it was marked as a new file creation
+                if final_content_in_memory is not None: # And there's content to write
                     needs_write = True
-            elif (
-                final_content is not None
-                and final_content != initial_content_normalized
-            ):
+            elif final_content_in_memory is not None and \
+                 final_content_in_memory != initial_content_from_disk_normalized:
+                # If it existed and content has changed from original disk state
                 needs_write = True
-
+            
             if needs_write:
                 self.logger.info(f"Writing final changes to '{rel_path}'...")
-                if self.file_manager.write_file(abs_path, final_content):
-                    modified_files.add(rel_path)  # Track successfully written files
+                if self.file_manager.write_file(abs_path, final_content_in_memory):
+                    modified_files_on_disk.add(rel_path)
                     if rel_path in files_created_in_this_run:
                         self.logger.info(f"Successfully created/wrote '{rel_path}'")
                     else:
@@ -254,22 +267,20 @@ class CodeApplier:
                             f"Successfully saved changes to '{rel_path}'"
                         )
                 else:
-                    # Error printed by write_file
                     self.logger.error(
                         f"Failed to write final changes to '{rel_path}'."
                     )
-                    write_failed = True  # Mark overall failure if any write fails
+                    write_failed = True
 
+        # Lint all files that were touched (created or had attempt to modify)
         for rel_path in touched_files:
             abs_path = self.file_manager.get_abs_path(rel_path)
-            if not abs_path:
-                self.logger.error(
-                    f"Could not resolve path '{rel_path}' for linting. Skipping."
-                )
+            if not abs_path: # Should have been caught above, but defensive
                 continue
 
+            # Lint the final in-memory state, as that's what would have been written or attempted
             content_to_lint = edited_file_content.get(rel_path)
-            if content_to_lint is None:
+            if content_to_lint is None: # Should not happen if it's in touched_files and processed
                 continue
 
             error_string: Optional[str] = None
@@ -291,7 +302,7 @@ class CodeApplier:
             self.logger.error(
                 f"Failed to apply edit(s): {', '.join(map(str, sorted(failed_edits_indices)))}"
             )
-        return all_succeeded, failed_edits_indices, modified_files, lint_errors_found
+        return all_succeeded, failed_edits_indices, modified_files_on_disk, lint_errors_found
 
     def _print_diff(
         self, rel_path: str, original_content: str, new_content: str
