@@ -3,7 +3,7 @@ from pathlib import Path
 
 setuptools.setup(
     name="tinycoder",
-    version="0.4.4",
+    version="0.4.5",
     author="Koen van Eijk",
     author_email="vaneijk.koen@gmail.com",
     description="A simplified AI coding assistant.",
