@@ -415,14 +415,13 @@ class RepoMap:
             # Handle potential errors during parsing if needed, though base class handles some
 
     def generate_map(self, chat_files_rel: Set[str]) -> str:
-        """Generates the repository map string including Python and HTML."""
+        """Generates the repository map string for Python files."""
         map_sections: Dict[str, List[str]] = {
             "Python Files": [],
-            "HTML Files": [],
             # Add more sections later (e.g., "CSS Files")
         }
         processed_py_files = 0
-        processed_html_files = 0
+        # processed_html_files = 0 # Removed HTML counter
 
         # --- Process Python Files ---
         for file_path in self.get_py_files():
@@ -504,21 +503,8 @@ class RepoMap:
                 map_sections["Python Files"].extend(file_map_lines)
                 processed_py_files += 1
 
-        # --- Process HTML Files ---
-        for file_path in self.get_html_files():
-            try:
-                rel_path_str = str(file_path.relative_to(self.root))
-            except ValueError:
-                rel_path_str = str(file_path)
-
-            if rel_path_str in chat_files_rel:
-                continue
-
-            structure = self.get_html_structure(file_path)
-            if structure:
-                file_map_lines = [f"\n`{rel_path_str}`:"] + structure
-                map_sections["HTML Files"].extend(file_map_lines)
-                processed_html_files += 1
+        # --- HTML Files Processing Removed ---
+        # The entire block for processing HTML files has been removed.
 
         # --- Combine Sections ---
         final_map_lines = []
@@ -528,10 +514,10 @@ class RepoMap:
         MAX_MAP_LINES = 1000  # Limit the number of lines in the map
 
         # Add header only if there's content
-        if processed_py_files > 0 or processed_html_files > 0:
+        if processed_py_files > 0: # Condition updated to only check Python files
             final_map_lines.append("\nRepository Map (other files):")
         else:
-            # If no files were found or processed in any category, return empty string
+            # If no Python files were found or processed, return empty string
             return ""
 
         for section_name, section_lines in map_sections.items():
