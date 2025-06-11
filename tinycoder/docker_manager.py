@@ -1,14 +1,7 @@
 import logging
 import subprocess
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Any
-
-# Try to import yaml, but don't make it a hard requirement for the whole app
-try:
-    import yaml
-    YAML_AVAILABLE = True
-except ImportError:
-    YAML_AVAILABLE = False
+from typing import Dict, List, Optional, Set, Any, Tuple
 
 class DockerManager:
     """Manages Docker interactions for a project."""
@@ -79,27 +72,117 @@ class DockerManager:
         return success
 
     def _parse_compose_file(self):
-        """Parses the docker-compose.yml file to extract service information."""
-        if not YAML_AVAILABLE:
-            self.logger.warning("PyYAML is not installed. Cannot parse docker-compose.yml. Run 'pip install PyYAML'.")
-            return
-        
+        """Parses the docker-compose.yml file using a pure Python parser."""
         if not self.compose_file:
             return
 
         try:
-            with open(self.compose_file, 'r') as f:
-                compose_data = yaml.safe_load(f)
-            
-            if compose_data and 'services' in compose_data:
+            with open(self.compose_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+
+            compose_data = self._parse_yaml_simple(content)
+
+            if compose_data and 'services' in compose_data and isinstance(compose_data.get('services'), dict):
                 self.services = compose_data['services']
                 self.logger.debug(f"Parsed services from compose file: {', '.join(self.services.keys())}")
-            else:
-                self.logger.warning("docker-compose.yml seems to be invalid or has no services defined.")
-        except yaml.YAMLError as e:
-            self.logger.error(f"Error parsing {self.compose_file}: {e}")
+            elif compose_data:
+                self.logger.warning("docker-compose.yml seems to be invalid or has no 'services' dictionary.")
+            # else: self._parse_yaml_simple would have logged any errors
+
         except IOError as e:
             self.logger.error(f"Error reading {self.compose_file}: {e}")
+        except Exception as e:
+            self.logger.error(f"An unexpected error occurred while parsing {self.compose_file}: {e}")
+
+    def _parse_yaml_simple(self, content: str) -> Optional[Dict[str, Any]]:
+        """
+        A lightweight, pure-Python YAML parser for docker-compose files.
+        This parser is designed to handle indentation-based key-value pairs and lists
+        of strings, which covers the majority of docker-compose.yml syntax. It does not
+        support advanced features like anchors, aliases, or multi-line strings.
+        """
+        lines_with_indent = []
+        for line in content.splitlines():
+            # Strip comments and trailing whitespace
+            sanitized = line.split('#', 1)[0].rstrip()
+            if not sanitized:
+                continue
+            indent = len(line) - len(line.lstrip(' '))
+            lines_with_indent.append((indent, sanitized.strip()))
+
+        if not lines_with_indent:
+            return None
+
+        # We use a recursive helper function to build the structure.
+        data, _ = self._build_node(lines_with_indent, 0, -1)
+        return data
+
+    def _build_node(self, lines: List[Tuple[int, str]], start_index: int, parent_indent: int) -> Tuple[Any, int]:
+        """Recursively builds a dictionary or list node from a list of indented lines."""
+        if start_index >= len(lines):
+            return None, start_index
+
+        first_indent, first_line = lines[start_index]
+
+        # This block of lines is not a child of the caller, so return control.
+        if first_indent <= parent_indent:
+            return None, start_index
+
+        # Decide if this node is a dictionary or a list based on the first line.
+        if first_line.startswith('- '):
+            # It's a list
+            node = []
+            current_index = start_index
+            while current_index < len(lines):
+                indent, line = lines[current_index]
+                if indent < first_indent:
+                    break  # End of list block (de-dented)
+
+                if indent > first_indent:
+                    self.logger.warning(f"YAML parser: Unexpected indent in list, skipping line: '{line}'")
+                    current_index += 1
+                    continue
+
+                if not line.startswith('- '):
+                    break  # End of list block (different item type)
+
+                value = line[2:].strip()
+                node.append(value)
+                current_index += 1
+            return node, current_index
+        else:
+            # It's a dictionary
+            node = {}
+            current_index = start_index
+            while current_index < len(lines):
+                indent, line = lines[current_index]
+                if indent < first_indent:
+                    break  # End of dict block (de-dented)
+
+                if indent > first_indent:
+                    # This line is a child of a previous key, but we handle that via recursion.
+                    # If we are in this loop, we only process lines at the *same* level.
+                    # So we skip this mis-indented line.
+                    current_index += 1
+                    continue
+
+                if ':' not in line:
+                    break  # End of dict block (not a key:value pair)
+
+                key, value_str = line.split(':', 1)
+                key = key.strip()
+                value_str = value_str.strip()
+
+                if value_str:
+                    node[key] = value_str
+                    current_index += 1
+                else:
+                    # The value is a nested structure on subsequent lines.
+                    child_node, next_index = self._build_node(lines, current_index + 1, first_indent)
+                    if child_node is not None:
+                        node[key] = child_node
+                    current_index = next_index
+            return node, current_index
 
     def find_affected_services(self, modified_files: List[Path]) -> Set[str]:
         """
