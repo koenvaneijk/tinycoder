@@ -188,6 +188,62 @@ class DockerManager:
             self.logger.info(f"Service '{service_name}' built successfully.")
             return True
 
+    def get_ps(self) -> Optional[str]:
+        """Runs 'docker-compose ps' and returns the output."""
+        success, stdout, stderr = self._run_command(['docker-compose', 'ps'])
+        if not success:
+            self.logger.error(f"Failed to get docker-compose status:\n{stderr}")
+            return None
+        return stdout
+
+    def stream_logs(self, service_name: str):
+        """Streams logs from a specific docker-compose service."""
+        self.logger.info(f"Streaming logs for service '{service_name}'. Press Ctrl+C to stop.")
+        try:
+            # Using Popen for live output streaming
+            process = subprocess.Popen(
+                ['docker-compose', 'logs', '-f', service_name],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                cwd=str(self.root_dir) if self.root_dir else None
+            )
+            if process.stdout:
+                for line in iter(process.stdout.readline, ''):
+                    self.logger.info(line.strip())
+            process.wait()
+        except KeyboardInterrupt:
+            self.logger.info(f"\nStopped streaming logs for '{service_name}'.")
+        except Exception as e:
+            self.logger.error(f"Error streaming logs for '{service_name}': {e}")
+
+    def run_command_in_service(self, service_name: str, command: str) -> bool:
+        """Runs a command inside a specified service container."""
+        self.logger.info(f"Running command in service '{service_name}': {command}")
+        
+        # We need to use Popen to stream the output nicely
+        try:
+            full_command = ['docker-compose', 'exec', service_name] + command.split()
+            process = subprocess.Popen(
+                full_command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                cwd=str(self.root_dir) if self.root_dir else None
+            )
+            if process.stdout:
+                for line in iter(process.stdout.readline, ''):
+                    self.logger.info(line.strip())
+            
+            retcode = process.wait()
+            if retcode != 0:
+                self.logger.error(f"Command failed with exit code {retcode} in service '{service_name}'.")
+                return False
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to execute command in service '{service_name}': {e}")
+            return False
+
     def check_for_missing_volume_mounts(self, files_in_context: List[Path]):
         """Checks if files in context are covered by a volume mount and warns if not."""
         if not self.services or not self.root_dir or not files_in_context:
@@ -214,5 +270,6 @@ class DockerManager:
             relative_paths = [f.relative_to(self.root_dir) for f in unmounted_files]
             self.logger.warning("The following files in your context are not covered by a Docker volume mount:")
             for rel_path in relative_paths:
-                self.logger.warning(f"  - {FmtColors['YELLOW']}{rel_path}{RESET}")
+                # The logger's formatter will handle coloring based on the 'warning' level
+                self.logger.warning(f"  - {rel_path}")
             self.logger.warning("Code changes to these files will not be reflected in your running containers.")

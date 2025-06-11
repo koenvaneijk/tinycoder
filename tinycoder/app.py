@@ -341,6 +341,7 @@ class App:
         self.command_handler = CommandHandler(
             file_manager=self.file_manager,
             git_manager=self.git_manager,
+            docker_manager=self.docker_manager,
             clear_history_func=self.history_manager.clear,
             write_history_func=self.history_manager.save_message_to_file_only,
             get_mode=lambda: self.mode,

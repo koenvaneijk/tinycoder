@@ -9,6 +9,7 @@ from tinycoder.editor import launch_editor_cli
 if TYPE_CHECKING:
     from tinycoder.file_manager import FileManager
     from tinycoder.git_manager import GitManager
+    from tinycoder.docker_manager import DockerManager
 
 # Define CommandHandlerReturn tuple for clarity
 CommandHandlerReturn = Tuple[bool, Optional[str]] # bool: continue_processing, Optional[str]: immediate_prompt_arg
@@ -21,6 +22,7 @@ class CommandHandler:
         self,
         file_manager: "FileManager",
         git_manager: "GitManager",
+        docker_manager: Optional["DockerManager"],
         clear_history_func: Callable[[], None],
         write_history_func: Callable[[str, str], None],
         get_mode: Callable[[], str],
@@ -44,6 +46,7 @@ class CommandHandler:
         Args:
             file_manager: An instance of FileManager.
             git_manager: An instance of GitManager.
+            docker_manager: An instance of DockerManager, or None.
             clear_history_func: Function to clear chat history.
             write_history_func: Function to write to chat history.
             get_mode: Function to get current mode.
@@ -63,6 +66,7 @@ class CommandHandler:
         """
         self.file_manager = file_manager
         self.git_manager = git_manager
+        self.docker_manager = docker_manager
         self.clear_history_func = clear_history_func
         self.write_history_func = write_history_func
         self.get_mode = get_mode
@@ -258,10 +262,60 @@ class CommandHandler:
         elif command == "/tests":
             if args_str:
                 self.logger.warning("/tests command does not accept arguments.")
-            run_tests(
-                 self.write_history_func,
-                 self.git_manager,
-             )
+
+            # Make the /tests command Docker-aware
+            if self.docker_manager and self.docker_manager.services:
+                # Simple heuristic: run tests in the first service available, or look for a 'test' service
+                service_to_test = None
+                if 'test' in self.docker_manager.services:
+                    service_to_test = 'test'
+                elif self.docker_manager.services:
+                    # Fallback to the first service defined in the compose file
+                    service_to_test = next(iter(self.docker_manager.services))
+                
+                if service_to_test:
+                    self.logger.info(f"Docker detected. Running tests in '{service_to_test}' service...")
+                    # Common test commands, try pytest first
+                    test_command_to_run = "pytest" 
+                    self.docker_manager.run_command_in_service(service_to_test, test_command_to_run)
+                else:
+                    self.logger.warning("Docker detected, but could not determine a service to run tests in. Running locally.")
+                    run_tests(self.write_history_func, self.git_manager)
+            else:
+                self.logger.info("No Docker environment detected. Running tests locally.")
+                run_tests(self.write_history_func, self.git_manager)
+            return True, None
+
+        elif command == "/docker":
+            if not self.docker_manager or not self.docker_manager.is_available:
+                self.logger.error("Docker integration is not available or enabled.")
+                return True, None
+
+            docker_parts = args_str.split(maxsplit=1)
+            sub_command = docker_parts[0] if docker_parts else "ps" # Default to ps
+            sub_args = docker_parts[1].strip() if len(docker_parts) > 1 else None
+
+            if sub_command == "ps":
+                output = self.docker_manager.get_ps()
+                if output:
+                    self.logger.info("---\n" + output)
+            elif sub_command == "logs":
+                if not sub_args:
+                    self.logger.error("Usage: /docker logs <service_name>")
+                else:
+                    self.docker_manager.stream_logs(sub_args)
+            elif sub_command == "restart":
+                if not sub_args:
+                    self.logger.error("Usage: /docker restart <service_name>")
+                else:
+                    self.docker_manager.restart_service(sub_args)
+            elif sub_command == "build":
+                if not sub_args:
+                    self.logger.error("Usage: /docker build <service_name>")
+                else:
+                    self.docker_manager.build_service(sub_args)
+            else:
+                self.logger.error(f"Unknown /docker command '{sub_command}'. Use ps, logs, restart, build.")
             return True, None
 
         elif command == "/files":
@@ -404,7 +458,11 @@ class CommandHandler:
   /ask                        Switch to ASK mode (answer questions, no edits).
   /code                       Switch to CODE mode (make edits).
   /edit <filename>            Open the specified file in a built-in text editor.
-  /tests                      Run unit tests found in the ./tests directory.
+  /tests                      Run unit tests (runs in container if docker-compose.yml is present).
+  /docker ps                  Show status of Docker containers.
+  /docker logs <service>      Stream logs from a Docker container.
+  /docker restart <service>   Restart a Docker container.
+  /docker build <service>     Build a Docker container.
   /rules list                 List available built-in and custom rules and their status for this project.
   /rules enable <rule_name>   Enable a rule for this project.
   /rules disable <rule_name>  Disable a rule for this project.
