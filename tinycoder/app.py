@@ -783,16 +783,7 @@ class App:
 
     def process_user_input(self):
         """Processes the latest user input (already in history), sends to LLM, handles response."""
-        try:
-            response = self._send_to_llm()
-        except KeyboardInterrupt:
-            # The spinner is stopped inside the except block to ensure cleanup
-            # even if the LLM call is interrupted.
-            self.spinner.stop()
-            self.logger.info("\nLLM request cancelled.")
-            # Returning to the main input loop. The user's last message is in history
-            # but was not processed. They can continue with a new prompt.
-            return
+        response = self._send_to_llm()
 
         if response:
             self.history_manager.add_message("assistant", response)
