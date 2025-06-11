@@ -33,6 +33,7 @@ from tinycoder.ui.console_interface import ring_bell, ConsoleInterface
 from tinycoder.ui.command_completer import CommandCompleter, READLINE_AVAILABLE as COMPLETION_READLINE_AVAILABLE
 from tinycoder.ui.log_formatter import ColorLogFormatter, STYLES, COLORS as FmtColors, RESET
 from tinycoder.ui.spinner import Spinner
+from tinycoder.docker_manager import DockerManager
 
 COMMIT_PREFIX = "🤖 tinycoder: "
 HISTORY_FILE = ".tinycoder_history"
@@ -48,6 +49,7 @@ class App:
         self._init_spinner()
         self._setup_git()
         self._init_core_managers(continue_chat)
+        self._setup_docker() # Initialize Docker manager
         self._init_prompt_builder()
         self._setup_rules_manager()
         self._init_input_preprocessor() # Initialize InputPreprocessor
@@ -167,6 +169,21 @@ class App:
         self.history_manager = ChatHistoryManager(continue_chat=continue_chat)
         self.repo_map = RepoMap(self.git_root) # Pass the final git_root
         self.logger.debug("Core managers (File, History, RepoMap) initialized.")
+
+    def _setup_docker(self) -> None:
+        """Initializes the DockerManager if Docker is available."""
+        # Depends on self.git_root being set, or cwd if not.
+        project_root = Path(self.git_root) if self.git_root else Path.cwd()
+        try:
+            self.docker_manager: Optional[DockerManager] = DockerManager(project_root, self.logger)
+            if not self.docker_manager.is_available:
+                self.docker_manager = None # Ensure it's None if not fully available
+                self.logger.info("Docker integration disabled.")
+            else:
+                self.logger.debug("DockerManager initialized successfully.")
+        except Exception as e:
+            self.logger.warning(f"Could not initialize Docker integration: {e}", exc_info=self.verbose)
+            self.docker_manager = None
 
     def _init_prompt_builder(self) -> None:
         """Initializes the PromptBuilder."""
@@ -361,8 +378,56 @@ class App:
         self.input_func = self.console_interface.determine_input_function()
         self.logger.debug("App components (Parser, Applier, ShellExecutor, Input Func from ConsoleInterface) initialized.")
 
+    def _handle_docker_automation(self, modified_files_rel: List[str], non_interactive: bool = False):
+        """
+        After edits are applied, checks for Docker context and automates actions.
+        - Restarts services that don't have live-reload.
+        - Prompts to build if dependency files change.
+        """
+        if not self.docker_manager or not self.docker_manager.is_available or not self.docker_manager.services:
+            self.logger.debug("Docker automation skipped: manager not available or no services found.")
+            return
+
+        modified_files_abs = [self.file_manager.get_abs_path(f) for f in modified_files_rel if self.file_manager.get_abs_path(f)]
+        if not modified_files_abs:
+            return # No valid files to check
+
+        affected_services = self.docker_manager.find_affected_services(modified_files_abs)
+        if not affected_services:
+            self.logger.debug("No Docker services affected by file changes.")
+            return
+
+        dependency_files = ["requirements.txt", "pyproject.toml", "package.json", "Pipfile"]
+        modified_dep_files = any(Path(f).name in dependency_files for f in modified_files_rel)
+
+        if modified_dep_files:
+            self.logger.warning(f"Dependency files changed for services: {', '.join(affected_services)}")
+            if non_interactive:
+                self.logger.info("Non-interactive mode: Skipping build prompt. Please build manually.")
+                return
+
+            try:
+                confirm = input("Rebuild affected services now? (y/N): ").strip().lower()
+                if confirm == 'y':
+                    for service in affected_services:
+                        self.docker_manager.build_service(service)
+            except (EOFError, KeyboardInterrupt):
+                self.logger.info("\nBuild cancelled by user.")
+            return # Stop further action after handling dependencies
+
+        # Standard code change, check for restart
+        for service in affected_services:
+            if self.docker_manager.is_service_running(service):
+                if not self.docker_manager.has_live_reload(service):
+                    self.logger.info(f"Service '{service}' is running without apparent live-reload.")
+                    self.docker_manager.restart_service(service)
+                else:
+                    self.logger.info(f"Service '{service}' has live-reload, no action needed.")
+            else:
+                self.logger.debug(f"Service '{service}' is not running, skipping restart.")
+
     def _log_final_status(self) -> None:
-        """Logs the final Git integration status after all setup."""
+        """Logs the final Git and Docker integration status after all setup."""
         if not self.git_manager.is_git_available():
             # Warning already logged during init
             self.logger.debug("Final check: Git is unavailable. Git integration disabled.")
@@ -379,6 +444,18 @@ class App:
             elif str(self.repo_map.root.resolve()) != str(Path(self.git_root).resolve()):
                 self.logger.warning(f"Mismatch between GitManager root ({self.git_root}) and RepoMap root ({self.repo_map.root}). Using GitManager root.")
                 self.repo_map.root = Path(self.git_root)
+        
+        # Docker part
+        if self.docker_manager and self.docker_manager.is_available:
+            self.logger.debug("Final check: Docker integration is active.")
+            if self.docker_manager.compose_file:
+                self.logger.debug(f"Using compose file: {self.docker_manager.compose_file}")
+            # Check for missing volume mounts for any initial files
+            if self.file_manager.get_files():
+                files_in_context_abs = [self.file_manager.get_abs_path(f) for f in self.file_manager.get_files() if self.file_manager.get_abs_path(f)]
+                self.docker_manager.check_for_missing_volume_mounts(files_in_context_abs)
+        else:
+            self.logger.debug("Final check: Docker integration is disabled.")
 
 
     def _add_initial_files(self, files: List[str]) -> None:
@@ -781,7 +858,7 @@ class App:
 
         return False
 
-    def process_user_input(self):
+    def process_user_input(self, non_interactive: bool = False):
         """Processes the latest user input (already in history), sends to LLM, handles response."""
         response = self._send_to_llm()
 
@@ -813,6 +890,8 @@ class App:
                     if all_succeeded:
                         if modified_files:
                             self.logger.info("All edits applied successfully.")
+                            # Automate Docker actions before committing
+                            self._handle_docker_automation(list(modified_files), non_interactive=non_interactive)
                             self._git_add_commit(list(modified_files))
                         else:
                             self.logger.info("Edits processed, but no files were changed.")
@@ -1063,7 +1142,7 @@ class App:
 
         # Initial processing of the user message
         self.history_manager.add_message("user", message)  # Use history manager
-        self.process_user_input()  # This now handles LLM call, edits, linting
+        self.process_user_input(non_interactive=non_interactive)  # This now handles LLM call, edits, linting
 
         # Check if reflection is needed *and* allowed (interactive mode)
         while not non_interactive and self.reflected_message:
@@ -1087,7 +1166,7 @@ class App:
 
             # Add the reflected message to history *before* processing
             self.history_manager.add_message("user", message)
-            self.process_user_input()  # Process the reflected input
+            self.process_user_input(non_interactive=non_interactive)  # Process the reflected input
 
         return True  # Indicate normal processing occurred (or finished reflection loop)
 
