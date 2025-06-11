@@ -552,10 +552,12 @@ class App:
             self.logger.debug(f"Approx. total tokens to send: {total_tokens}") # Changed to debug for less noise
 
             self.spinner.start()
-            response_content, error_message = self.client.generate_content(
-                system_prompt=system_prompt_text, history=history_to_send
-            )
-            self.spinner.stop()
+            try:
+                response_content, error_message = self.client.generate_content(
+                    system_prompt=system_prompt_text, history=history_to_send
+                )
+            finally:
+                self.spinner.stop()
 
             # --- Handle response ---
             if error_message:
@@ -865,10 +867,16 @@ class App:
 
         history_for_files = [{"role": "user", "content": instruction}]
         self.spinner.start()
-        response_content, error_message = self.client.generate_content(
-            system_prompt=system_prompt, history=history_for_files
-        )
-        self.spinner.stop()
+        try:
+            response_content, error_message = self.client.generate_content(
+                system_prompt=system_prompt, history=history_for_files
+            )
+        except KeyboardInterrupt:
+            self.logger.info("\nLLM file suggestion cancelled.")
+            # The finally block will handle stopping the spinner.
+            return []  # Return empty list on cancellation
+        finally:
+            self.spinner.stop()
 
         if error_message:
             self.logger.error(f"Error asking LLM for files: {error_message}")
@@ -1179,6 +1187,7 @@ class App:
                     break  # Exit signal from run_one (e.g., /exit command)
 
             except KeyboardInterrupt:  # Handle Ctrl+C pressed *outside* the input function
+                self.spinner.stop()  # Ensure spinner is stopped on any interrupt that reaches here
                 if ctrl_c_pressed_once:
                     print("\nExiting.", file=sys.stderr)
                     break # Exit on second consecutive Ctrl+C (one outside input, one before/during)
