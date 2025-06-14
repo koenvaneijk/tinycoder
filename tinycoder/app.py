@@ -1299,9 +1299,27 @@ class App:
         active_rules_line = f"  Rules: {active_rules_status_output_str}"
         help_line = f"  Type {FmtColors['CYAN']}{STYLES['BOLD']}/help{RESET} for commands, or {FmtColors['CYAN']}{STYLES['BOLD']}!<cmd>{RESET} to run shell commands. \n"
 
+        # Determine Docker status string
+        docker_status_output_str: str
+        if self.docker_manager and self.docker_manager.is_available:
+            if self.docker_manager.compose_file:
+                # Attempt to get a relative path for the compose file for cleaner display
+                compose_file_display_path = str(self.docker_manager.compose_file)
+                if self.docker_manager.root_dir and self.docker_manager.compose_file.is_relative_to(self.docker_manager.root_dir):
+                    compose_file_display_path = str(self.docker_manager.compose_file.relative_to(self.docker_manager.root_dir))
+                
+                docker_status_output_str = f"{FmtColors['GREEN']}{STYLES['BOLD']}Enabled{RESET} (compose: {FmtColors['CYAN']}{compose_file_display_path}{RESET})"
+            else:
+                docker_status_output_str = f"{FmtColors['YELLOW']}{STYLES['BOLD']}Enabled (no compose file detected){RESET}"
+        else:
+            docker_status_output_str = f"{STYLES['BOLD']}Disabled{RESET}"
+        
+        docker_line = f"  Docker: {docker_status_output_str}"
+
         # Log each part on a new line for clarity
         self.logger.info(model_line)
         self.logger.info(repo_map_line)
+        self.logger.info(docker_line) # Added Docker status line
         self.logger.info(active_rules_line)
         self.logger.info(help_line)
         
