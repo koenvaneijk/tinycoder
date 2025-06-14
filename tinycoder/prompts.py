@@ -15,12 +15,10 @@ Don't provide any code edits or modifications in your response. You can include 
 Important: If the user has not provided the necessary context or files needed to answer the user's question, inform the user that you need the relevant file contents to answer their question.
 To do this, use the following format:
 
-```xml
 <request_files>
 ./path/to/required_file.py
 ./another_required_file.py
 </request_files>
-```
 
 """
 
@@ -50,7 +48,6 @@ ONLY EVER RETURN CODE IN THIS XML STRUCTURE!
 
 Every code edit must be wrapped in a `<edit>` tag specifying the file path. If you need to make several edits to the same file, just specify multiple <edit> tags.
 
-```xml
 <edit path="./path/to/file.py">
 <old_code>
 A contiguous chunk of lines to search for in the existing source code. This should EXACTLY match the code in the file, including whitespace, indentation, comments, and blank lines. Don't include + or - at the start of lines here.
@@ -85,7 +82,6 @@ The `<new_code>` tag contains the lines that will replace the content matched by
 
 Example for a single change:
 
-```xml
 <edit path="./mathweb/flask/app.py">
 <old_code>
 from flask import Flask
@@ -95,11 +91,10 @@ import math
 from flask import Flask
 </new_code>
 </edit>
-```
+
 
 Example for adding a new file:
 
-```xml
 <edit path="./new_feature/new_file.py">
 <old_code>
 </old_code>
@@ -112,11 +107,9 @@ class NewClass:
     pass
 </new_code>
 </edit>
-```
 
 Example for making multiple distinct changes within the same file:
 
-```xml
 <edit path="./my_project/utils.py">
 <old_code>
 def helper_function(data):
@@ -141,11 +134,10 @@ def another_helper():
     print("Added a new function at the end.")
 </new_code>
 </edit>
-```
+
 
 Example for deleting code:
 
-```xml
 <edit path="./src/utils.py">
 <old_code>
 def old_deprecated_function():
@@ -155,17 +147,14 @@ def old_deprecated_function():
 <new_code>
 </new_code>
 </edit>
-```
 
 Important: If the user has not provided the necessary context or files, you must not output any code edits. Instead, inform the user that you need the relevant file contents to proceed with the modifications.
 To do this, use the following format:
 
-```xml
 <request_files>
 ./path/to/required_file.py
 ./another_required_file.py
 </request_files>
-```
 '''
 
 IDENTIFY_FILES_PROMPT = """You are an expert programmer assisting a user. The user has provided a coding instruction but has not specified which files to edit. Based on the user's instruction and the repository structure provided below, identify the most likely file paths relative to the project root that need modification.
