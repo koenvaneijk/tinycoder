@@ -240,18 +240,26 @@ class CommandHandler:
             return True, None
 
         elif command == "/ask":
-            if args_str:
-                self.logger.warning("/ask command no longer accepts arguments. It only switches mode. Use /code or /ask then enter your query.")
             self.set_mode("ask")
-            self.logger.info("Switched to ASK mode. I will answer questions but not edit files.")
-            return True, None
+            if args_str:
+                # Log a truncated version of the prompt if it's long
+                prompt_preview = args_str[:50] + ('...' if len(args_str) > 50 else '')
+                self.logger.info(f"Switched to ASK mode. Processing prompt: \"{prompt_preview}\"")
+                return True, args_str  # Pass args_str as immediate_prompt_arg
+            else:
+                self.logger.info("Switched to ASK mode. I will answer questions but not edit files.")
+                return True, None
 
         elif command == "/code":
-            if args_str:
-                self.logger.warning("/code command no longer accepts arguments. It only switches mode. Use /code or /ask then enter your query.")
             self.set_mode("code")
-            self.logger.info("Switched to CODE mode. I will try to edit files.")
-            return True, None
+            if args_str:
+                # Log a truncated version of the prompt if it's long
+                prompt_preview = args_str[:50] + ('...' if len(args_str) > 50 else '')
+                self.logger.info(f"Switched to CODE mode. Processing prompt: \"{prompt_preview}\"")
+                return True, args_str  # Pass args_str as immediate_prompt_arg
+            else:
+                self.logger.info("Switched to CODE mode. I will try to edit files.")
+                return True, None
         
         elif command == "/suggest_files":
             # args_str contains the optional instruction from the user
