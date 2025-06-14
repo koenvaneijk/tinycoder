@@ -103,15 +103,15 @@ class CodeApplier:
                 and rel_path not in touched_files # Check if touched earlier in *this specific batch*
             ):
                 confirm = self.input_func(
-                    f"LLM wants to edit '{rel_path}' which is not in the chat. Allow? (y/N): "
+                    f"LLM wants to edit '{COLORS['CYAN']}{rel_path}{RESET}' which is not in the chat. Allow? (y/N): "
                 )
                 if confirm.lower() == "y":
                     if not self.file_manager.add_file(fname): # Adds to FileManager's context
-                        self.logger.error(f"Could not add '{fname}' to context for editing.")
+                        self.logger.error(f"Could not add '{COLORS['CYAN']}{fname}{RESET}' to context for editing.")
                         failed_edits_indices.append(i + 1)
                         continue
                 else:
-                    self.logger.error(f"Skipping edit for {fname} as user declined.")
+                    self.logger.error(f"Skipping edit for {COLORS['CYAN']}{fname}{RESET} as user declined.")
                     failed_edits_indices.append(i + 1)
                     continue
             
@@ -143,7 +143,7 @@ class CodeApplier:
                 if is_current_target_empty and is_search_effectively_empty:
                     # CASE 1: Current content is empty, and search block is empty or just whitespace (e.g., "\n").
                     self.logger.info(
-                        f"Edit {i+1} for '{rel_path}': Target is empty and search block "
+                        f"Edit {i+1} for '{COLORS['CYAN']}{rel_path}{RESET}': Target is empty and search block "
                         f"({repr(search_block_normalized)}) is effectively empty. Setting content to replace_block."
                     )
                     new_content_normalized = replace_block_normalized
@@ -151,7 +151,7 @@ class CodeApplier:
                     if not original_exists_on_disk and rel_path not in files_created_in_this_run:
                          files_created_in_this_run.add(rel_path)
                          self.logger.info(
-                            f"--- Planning to create '{rel_path}' with content ---"
+                            f"--- Planning to create '{COLORS['CYAN']}{rel_path}{RESET}' with content ---"
                          )
                          for line_content in replace_block_normalized.splitlines(): # Use splitlines() for proper iteration
                              self.logger.info(f"{COLORS['GREEN']}+ {line_content}{RESET}")
@@ -168,7 +168,7 @@ class CodeApplier:
                         occurrence_count = current_content_normalized.count(search_block_normalized)
                         if occurrence_count > 1:
                             self.logger.warning(
-                                f"Edit {i+1} for '{rel_path}': The search block {repr(search_block_normalized)} "
+                                f"Edit {i+1} for '{COLORS['CYAN']}{rel_path}{RESET}': The search block {repr(search_block_normalized)} "
                                 f"consists only of whitespace/newlines and appears {occurrence_count} times. "
                                 f"The edit will target the *first* occurrence."
                             )
@@ -184,12 +184,12 @@ class CodeApplier:
                        search_block_normalized.strip() != "":
                         self.logger.error(
                             f"Edit {i+1}: Cannot use non-empty, non-whitespace SEARCH block ({repr(search_preview)}) "
-                            f"on an initially non-existent file '{rel_path}'. Expected empty or whitespace-only search block for creation. Skipping."
+                            f"on an initially non-existent file '{COLORS['CYAN']}{rel_path}{RESET}'. Expected empty or whitespace-only search block for creation. Skipping."
                         )
                     else: 
                         content_preview = current_content_normalized.replace('\n', r'\n')[:50] + ('...' if len(current_content_normalized) > 50 else '')
                         self.logger.error(
-                            f"Edit {i+1}: SEARCH block ({repr(search_preview)}) not found exactly in current content of '{rel_path}'. "
+                            f"Edit {i+1}: SEARCH block ({repr(search_preview)}) not found exactly in current content of '{COLORS['CYAN']}{rel_path}{RESET}'. "
                             f"Content preview: ({repr(content_preview)}). Edit failed."
                         )
                     edit_failed_this_iteration = True
@@ -211,11 +211,11 @@ class CodeApplier:
                             )
                         edited_file_content[rel_path] = new_content_normalized # Update in-memory content
                         self.logger.info(
-                            f"Prepared edit {i+1} for '{rel_path}'"
+                            f"Prepared edit {i+1} for '{COLORS['CYAN']}{rel_path}{RESET}'"
                         )
                     else:
                         self.logger.info(
-                            f"Edit {i+1} for '{rel_path}' resulted in no changes to current state."
+                            f"Edit {i+1} for '{COLORS['CYAN']}{rel_path}{RESET}' resulted in no changes to current state."
                         )
                 
                 if edit_failed_this_iteration:
@@ -223,7 +223,7 @@ class CodeApplier:
 
             except Exception as e:
                 self.logger.error(
-                    f"Unexpected error processing edit {i+1} for '{fname}': {e}"
+                    f"Unexpected error processing edit {i+1} for '{COLORS['CYAN']}{fname}{RESET}': {e}"
                 )
                 failed_edits_indices.append(i + 1)
 
@@ -233,7 +233,7 @@ class CodeApplier:
             abs_path = self.file_manager.get_abs_path(rel_path)
             if not abs_path:
                 self.logger.error(
-                    f"Cannot resolve path '{rel_path}' for writing final changes."
+                    f"Cannot resolve path '{COLORS['CYAN']}{rel_path}{RESET}' for writing final changes."
                 )
                 write_failed = True
                 continue
@@ -257,18 +257,18 @@ class CodeApplier:
                 needs_write = True
             
             if needs_write:
-                self.logger.info(f"Writing final changes to '{rel_path}'...")
+                self.logger.info(f"Writing final changes to '{COLORS['CYAN']}{rel_path}{RESET}'...")
                 if self.file_manager.write_file(abs_path, final_content_in_memory):
                     modified_files_on_disk.add(rel_path)
                     if rel_path in files_created_in_this_run:
-                        self.logger.info(f"Successfully created/wrote '{rel_path}'")
+                        self.logger.info(f"Successfully created/wrote '{COLORS['CYAN']}{rel_path}{RESET}'")
                     else:
                         self.logger.info(
-                            f"Successfully saved changes to '{rel_path}'"
+                            f"Successfully saved changes to '{COLORS['CYAN']}{rel_path}{RESET}'"
                         )
                 else:
                     self.logger.error(
-                        f"Failed to write final changes to '{rel_path}'."
+                        f"Failed to write final changes to '{COLORS['CYAN']}{rel_path}{RESET}'."
                     )
                     write_failed = True
 
@@ -335,7 +335,7 @@ class CodeApplier:
         if not diff_output:
             return
 
-        self.logger.info(f"--- Diff for '{rel_path}' ---")
+        self.logger.info(f"--- Diff for '{COLORS['CYAN']}{rel_path}{RESET}' ---")
         diff_lines = []
         in_edit_block = False
         found_change = False
@@ -367,4 +367,4 @@ class CodeApplier:
                 diff_lines.append(line)
                 
         self.logger.info("\n".join(diff_lines))
-        self.logger.info(f"--- End Diff for '{rel_path}' ---")
+        self.logger.info(f"--- End Diff for '{COLORS['CYAN']}{rel_path}{RESET}' ---")

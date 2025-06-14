@@ -148,7 +148,7 @@ class App:
                 if initialized:
                     self.git_root = self.git_manager.get_root() # Re-fetch the root after init
                     if self.git_root:
-                        self.logger.info(f"Git repository initialized. Root: {self.git_root}")
+                        self.logger.info(f"Git repository initialized. Root: {FmtColors['CYAN']}{self.git_root}{RESET}")
                     else:
                         # Should not happen if initialize_repo succeeded, but handle defensively
                         self.logger.error("Git initialization reported success, but failed to find root afterwards. Proceeding without Git integration.")
@@ -157,7 +157,7 @@ class App:
             else:
                 self.logger.warning("Proceeding without Git integration.")
         else:
-            self.logger.debug(f"Found existing Git repository. Root: {self.git_root}")
+            self.logger.debug(f"Found existing Git repository. Root: {FmtColors['CYAN']}{self.git_root}{RESET}")
             # If git_root was found initially, we don't need to prompt or initialize
 
         # self.git_root is now set correctly (or None)
@@ -511,20 +511,20 @@ class App:
             self.logger.warning("Final check: Not inside a git repository. Git integration disabled.")
         else:
             # Git is available and we have a root
-            self.logger.debug(f"Final check: Git repository root confirmed: {self.git_root}")
+            self.logger.debug(f"Final check: Git repository root confirmed: {FmtColors['CYAN']}{self.git_root}{RESET}")
             # Ensure RepoMap knows the root (should be set by _init_core_managers)
             if self.repo_map.root is None: # Defensive check
                  self.logger.warning("RepoMap root was unexpectedly None, attempting to set.")
                  self.repo_map.root = Path(self.git_root)
             elif str(self.repo_map.root.resolve()) != str(Path(self.git_root).resolve()):
-                self.logger.warning(f"Mismatch between GitManager root ({self.git_root}) and RepoMap root ({self.repo_map.root}). Using GitManager root.")
+                self.logger.warning(f"Mismatch between GitManager root ({FmtColors['CYAN']}{self.git_root}{RESET}) and RepoMap root ({FmtColors['CYAN']}{self.repo_map.root}{RESET}). Using GitManager root.")
                 self.repo_map.root = Path(self.git_root)
         
         # Docker part
         if self.docker_manager and self.docker_manager.is_available:
             self.logger.debug("Final check: Docker integration is active.")
             if self.docker_manager.compose_file:
-                self.logger.debug(f"Using compose file: {self.docker_manager.compose_file}")
+                self.logger.debug(f"Using compose file: {FmtColors['CYAN']}{self.docker_manager.compose_file}{RESET}")
             # Check for missing volume mounts for any initial files
             if self.file_manager.get_files():
                 files_in_context_abs = [self.file_manager.get_abs_path(f) for f in self.file_manager.get_files() if self.file_manager.get_abs_path(f)]
@@ -536,7 +536,8 @@ class App:
     def _add_initial_files(self, files: List[str]) -> None:
         """Adds initial files specified via command line arguments."""
         if files:
-            self.logger.info(f"Adding initial files to context: {', '.join(files)}")
+            colored_files = [f"{FmtColors['CYAN']}{f}{RESET}" for f in files]
+            self.logger.info(f"Adding initial files to context: {', '.join(colored_files)}")
             added_count = 0
             for fname in files:
                 if self.file_manager.add_file(fname):
@@ -780,7 +781,7 @@ class App:
                 # Warn if a specifically requested path doesn't exist
                 if paths_to_commit is not None:
                     self.logger.warning(
-                        f"Requested commit path {fname} does not exist on disk, skipping.",
+                        f"Requested commit path {FmtColors['CYAN']}{fname}{RESET} does not exist on disk, skipping.",
                     )
                 # Don't warn if iterating all context files and one is missing (it might have been deleted)
 
@@ -916,10 +917,11 @@ class App:
                     successfully_added_fnames.append(fname)
             
             if added_count > 0:
-                tool_message = f"Added {added_count} file(s) to context from LLM request: {', '.join(successfully_added_fnames)}"
+                colored_successfully_added_fnames = [f"{FmtColors['CYAN']}{f}{RESET}" for f in successfully_added_fnames]
+                tool_message = f"Added {added_count} file(s) to context from LLM request: {', '.join(colored_successfully_added_fnames)}"
                 self.history_manager.save_message_to_file_only("tool", tool_message)
                 reflection_content = (
-                    f"The following files have been added to the context as per your request: {', '.join(successfully_added_fnames)}. "
+                    f"The following files have been added to the context as per your request: {', '.join(colored_successfully_added_fnames)}. "
                     "Please proceed with the original task based on the updated context."
                 )
                 self.reflected_message = reflection_content
@@ -990,7 +992,7 @@ class App:
                 if self.lint_errors_found and not self.reflected_message: 
                     error_messages = ["Found syntax errors after applying edits:"]
                     for fname, error in self.lint_errors_found.items():
-                        error_messages.append(f"\n--- Errors in {fname} ---\n{error}")
+                        error_messages.append(f"\n--- Errors in {FmtColors['CYAN']}{fname}{RESET} ---\n{error}")
                     combined_errors = "\n".join(error_messages)
                     self.logger.error(combined_errors)
 
@@ -1047,12 +1049,17 @@ class App:
                 existing_files.append(fname)
             else:
                 self.logger.warning(
-                    f"Ignoring non-existent file suggested by LLM: {fname}"
+                    f"Ignoring non-existent file suggested by LLM: {FmtColors['CYAN']}{fname}{RESET}"
                 )
-
-        self.logger.info(
-            f"LLM suggested files (after filtering): {', '.join(existing_files)}",
-        )
+        
+        if existing_files:
+            colored_existing_files = [f"{FmtColors['CYAN']}{f}{RESET}" for f in existing_files]
+            self.logger.info(
+                f"LLM suggested files (after filtering): {', '.join(colored_existing_files)}",
+            )
+        else:
+            self.logger.info("LLM suggested no existing files after filtering.")
+            
         return existing_files
 
     def init_before_message(self):
