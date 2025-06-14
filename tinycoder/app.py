@@ -393,39 +393,113 @@ class App:
         if not modified_files_abs:
             return # No valid files to check
 
-        affected_services = self.docker_manager.find_affected_services(modified_files_abs)
-        if not affected_services:
+        # find_affected_services now returns Dict[str, Set[str]]
+        affected_services_map = self.docker_manager.find_affected_services(modified_files_abs)
+        if not affected_services_map:
             self.logger.debug("No Docker services affected by file changes.")
             return
 
-        dependency_files = ["requirements.txt", "pyproject.toml", "package.json", "Pipfile"]
-        modified_dep_files = any(Path(f).name in dependency_files for f in modified_files_rel)
+        dependency_files = ["requirements.txt", "pyproject.toml", "package.json", "Pipfile", "Dockerfile"] # Added Dockerfile
+        modified_dep_files = any(Path(f).name.lower() in dependency_files for f in modified_files_rel) # .lower() for Dockerfile
 
-        if modified_dep_files:
-            self.logger.warning(f"Dependency files changed for services: {', '.join(affected_services)}")
-            if non_interactive:
-                self.logger.info("Non-interactive mode: Skipping build prompt. Please build manually.")
-                return
+        services_to_build_and_restart = set()
+        services_to_volume_restart_only = set()
 
-            try:
-                confirm = input("Rebuild affected services now? (y/N): ").strip().lower()
-                if confirm == 'y':
-                    for service in affected_services:
-                        self.docker_manager.build_service(service)
-            except (EOFError, KeyboardInterrupt):
-                self.logger.info("\nBuild cancelled by user.")
-            return # Stop further action after handling dependencies
+        for service_name, reasons in affected_services_map.items():
+            needs_build = False
+            # If any global dep file changed for *any* service, all *affected* services are marked for build.
+            # Or if Dockerfile specific to a service's build context (or the context itself) changes.
+            if modified_dep_files: 
+                # Check if this specific service's Dockerfile or build context is among the changed dependency files
+                service_build_config = self.docker_manager.services.get(service_name, {}).get('build', {})
+                service_build_context_str = None
+                if isinstance(service_build_config, str):
+                    service_build_context_str = service_build_config
+                elif isinstance(service_build_config, dict):
+                    service_build_context_str = service_build_config.get('context')
+                
+                service_dockerfile_str = "Dockerfile" # default
+                if isinstance(service_build_config, dict) and isinstance(service_build_config.get('dockerfile'), str):
+                     service_dockerfile_str = service_build_config.get('dockerfile')
 
-        # Standard code change, check for restart
-        for service in affected_services:
-            if self.docker_manager.is_service_running(service):
-                if not self.docker_manager.has_live_reload(service):
-                    self.logger.info(f"Service '{service}' is running without apparent live-reload.")
-                    self.docker_manager.restart_service(service)
+
+                if service_build_context_str and self.docker_manager.root_dir:
+                    service_build_context_path = (self.docker_manager.root_dir / service_build_context_str).resolve()
+                    
+                    # Check if any modified dep file is THE Dockerfile for this service, or within its context
+                    for mod_file_rel in modified_files_rel:
+                        mod_file_abs = self.file_manager.get_abs_path(mod_file_rel)
+                        if not mod_file_abs: continue
+
+                        # Is the modified file the Dockerfile for this service?
+                        # Resolve path to Dockerfile relative to context
+                        dockerfile_abs_path = (service_build_context_path / service_dockerfile_str).resolve()
+                        if mod_file_abs == dockerfile_abs_path:
+                            needs_build = True
+                            self.logger.debug(f"Service '{service_name}' Dockerfile '{service_dockerfile_str}' changed.")
+                            break
+                        # Is a generic dep file (like requirements.txt) inside this service's build context?
+                        if mod_file_abs.name.lower() in dependency_files and mod_file_abs.is_relative_to(service_build_context_path):
+                            needs_build = True
+                            self.logger.debug(f"Dependency file '{mod_file_abs.name}' changed within build context of '{service_name}'.")
+                            break
+                    if needs_build:
+                         self.logger.debug(f"Service '{service_name}' marked for build due to specific dependency change.")
+
+
+            if "build_context" in reasons and not needs_build: # if not already caught by dep check
+                needs_build = True
+                self.logger.debug(f"Service '{service_name}' marked for build due to direct build_context change.")
+
+            if needs_build:
+                services_to_build_and_restart.add(service_name)
+            elif "volume" in reasons: # Only consider for volume restart if not already needing a build
+                if self.docker_manager.is_service_running(service_name):
+                    if not self.docker_manager.has_live_reload(service_name):
+                        services_to_volume_restart_only.add(service_name)
+                    else:
+                        self.logger.info(f"Service '{service_name}' affected by volume change and has live-reload, no automatic restart needed.")
                 else:
-                    self.logger.info(f"Service '{service}' has live-reload, no action needed.")
+                    self.logger.debug(f"Service '{service_name}' affected by volume change but not running, skipping restart.")
+        
+        if services_to_build_and_restart:
+            sorted_build_services = sorted(list(services_to_build_and_restart))
+            self.logger.warning(
+                f"Services requiring build & restart: {', '.join(sorted_build_services)}"
+            )
+            if non_interactive:
+                self.logger.info("Non-interactive mode: Skipping build & restart prompt. Please manage manually.")
             else:
-                self.logger.debug(f"Service '{service}' is not running, skipping restart.")
+                try:
+                    confirm = input(f"Rebuild and restart affected services ({', '.join(sorted_build_services)}) now? (y/N): ").strip().lower()
+                    if confirm == 'y':
+                        for service in sorted_build_services:
+                            if self.docker_manager.build_service(service): 
+                                self.docker_manager.restart_service(service) 
+                            # else: build failed, build_service logged it.
+                except (EOFError, KeyboardInterrupt):
+                    self.logger.info("\nBuild & restart cancelled by user.")
+            return # Exit after build consideration, regardless of user choice
+
+        # Handle services that only needed a volume-based restart (and weren't built)
+        if services_to_volume_restart_only:
+            sorted_volume_services = sorted(list(services_to_volume_restart_only))
+            self.logger.info(
+                f"Services requiring restart due to volume changes (no live-reload): {', '.join(sorted_volume_services)}"
+            )
+            if non_interactive:
+                self.logger.info("Non-interactive mode: Skipping volume-based restart. Please manage manually.")
+            else:
+                try:
+                    # Could add a prompt here too if desired, but for now, auto-restarting these.
+                    # confirm_restart = input(f"Restart services ({', '.join(sorted_volume_services)}) now? (y/N): ").strip().lower()
+                    # if confirm_restart == 'y':
+                    for service in sorted_volume_services:
+                        self.logger.info(f"Service '{service}' is running without apparent live-reload and affected by volume change.")
+                        self.docker_manager.restart_service(service)
+                except (EOFError, KeyboardInterrupt):
+                    self.logger.info("\nVolume restart cancelled by user.")
+
 
     def _log_final_status(self) -> None:
         """Logs the final Git and Docker integration status after all setup."""

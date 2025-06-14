@@ -184,37 +184,70 @@ class DockerManager:
                     current_index = next_index
             return node, current_index
 
-    def find_affected_services(self, modified_files: List[Path]) -> Set[str]:
+    def find_affected_services(self, modified_files: List[Path]) -> Dict[str, Set[str]]:
         """
-        Identifies which services are affected by file changes based on volume mounts.
+        Identifies which services are affected by file changes based on 
+        volume mounts or build contexts.
 
         Args:
             modified_files: A list of absolute paths to modified files.
 
         Returns:
-            A set of service names affected by the changes.
+            A dictionary mapping service names to a set of reasons 
+            (e.g., {"volume", "build_context"}).
         """
-        affected = set()
+        affected_map: Dict[str, Set[str]] = {}
         if not self.services or not self.root_dir:
-            return affected
+            return affected_map
 
         for service_name, service_def in self.services.items():
+            reasons_for_affect: Set[str] = set()
+
+            # Check 1: Volume mounts
             volumes = service_def.get('volumes', [])
-            for volume in volumes:
-                if isinstance(volume, str) and ':' in volume:
-                    host_path_str = volume.split(':')[0]
-                    # Resolve host path relative to the compose file's directory (root_dir)
-                    host_path = (self.root_dir / host_path_str).resolve()
-                    
-                    for modified_file in modified_files:
-                        # Ensure modified_file is absolute before comparison
-                        if modified_file.resolve().is_relative_to(host_path):
-                            affected.add(service_name)
-                            break # Move to next service once one match is found
+            if isinstance(volumes, list): # Ensure volumes is a list
+                for volume_entry in volumes:
+                    if isinstance(volume_entry, str) and ':' in volume_entry:
+                        host_path_str = volume_entry.split(':')[0]
+                        # Resolve host path relative to the compose file's directory (root_dir)
+                        host_path = (self.root_dir / host_path_str).resolve()
+                        for modified_file in modified_files:
+                            # Ensure modified_file is absolute before comparison
+                            if modified_file.resolve().is_relative_to(host_path):
+                                reasons_for_affect.add("volume")
+                                break # Found a volume match for this service, check next modified_file
+                    if "volume" in reasons_for_affect: # If one volume matched, no need to check other volumes for this service
+                        break 
+            
+            # Check 2: Build context
+            build_config = service_def.get('build')
+            build_context_str: Optional[str] = None
+
+            if isinstance(build_config, str):
+                build_context_str = build_config
+            elif isinstance(build_config, dict):
+                ctx = build_config.get('context')
+                if isinstance(ctx, str):
+                    build_context_str = ctx
+            
+            if build_context_str:
+                # build_context_str is relative to the docker-compose.yml file (self.root_dir)
+                build_context_path = (self.root_dir / build_context_str).resolve()
+                for modified_file in modified_files:
+                    if modified_file.resolve().is_relative_to(build_context_path):
+                        reasons_for_affect.add("build_context")
+                        self.logger.debug(
+                            f"Service '{service_name}' affected due to change in build context: "
+                            f"{modified_file.relative_to(self.root_dir if self.root_dir else Path.cwd())}"
+                        )
+                        break # Found a build_context match, check next service
+            
+            if reasons_for_affect:
+                affected_map[service_name] = reasons_for_affect
         
-        if affected:
-            self.logger.debug(f"Affected services identified: {', '.join(affected)}")
-        return affected
+        if affected_map:
+            self.logger.debug(f"Affected services map: {affected_map}")
+        return affected_map
     
     def has_live_reload(self, service_name: str) -> bool:
         """
@@ -248,13 +281,13 @@ class DockerManager:
 
     def is_service_running(self, service_name: str) -> bool:
         """Checks if a specific service is running."""
-        success, stdout, _ = self._run_command(['docker-compose', 'ps', '-q', service_name])
+        success, stdout, _ = self._run_command(['docker', 'compose', 'ps', '-q', service_name])
         return success and bool(stdout)
 
     def restart_service(self, service_name: str):
         """Restarts a specific docker-compose service."""
         self.logger.info(f"Restarting service '{service_name}'...")
-        success, _, stderr = self._run_command(['docker-compose', 'restart', service_name])
+        success, _, stderr = self._run_command(['docker', 'compose', 'restart', service_name])
         if not success:
             self.logger.error(f"Failed to restart service '{service_name}':\n{stderr}")
         else:
@@ -263,7 +296,8 @@ class DockerManager:
     def build_service(self, service_name: str, non_interactive=False) -> bool:
         """Builds a specific docker-compose service."""
         self.logger.info(f"Building service '{service_name}'...")
-        success, stdout, stderr = self._run_command(['docker-compose', 'build', service_name])
+        # Add --no-cache for now to ensure fresh builds, can be made configurable later
+        success, stdout, stderr = self._run_command(['docker', 'compose', 'build', '--no-cache', service_name])
         if not success:
             self.logger.error(f"Failed to build service '{service_name}':\n{stderr}")
             return False
@@ -273,7 +307,7 @@ class DockerManager:
 
     def get_ps(self) -> Optional[str]:
         """Runs 'docker-compose ps' and returns the output."""
-        success, stdout, stderr = self._run_command(['docker-compose', 'ps'])
+        success, stdout, stderr = self._run_command(['docker', 'compose', 'ps'])
         if not success:
             self.logger.error(f"Failed to get docker-compose status:\n{stderr}")
             return None
@@ -285,7 +319,7 @@ class DockerManager:
         try:
             # Using Popen for live output streaming
             process = subprocess.Popen(
-                ['docker-compose', 'logs', '-f', service_name],
+                ['docker', 'compose', 'logs', '-f', service_name],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
@@ -306,7 +340,7 @@ class DockerManager:
         
         # We need to use Popen to stream the output nicely
         try:
-            full_command = ['docker-compose', 'exec', service_name] + command.split()
+            full_command = ['docker', 'compose', 'exec', service_name] + command.split()
             process = subprocess.Popen(
                 full_command,
                 stdout=subprocess.PIPE,
