@@ -19,7 +19,6 @@ To do this, use the following format:
 ./path/to/required_file.py
 ./another_required_file.py
 </request_files>
-
 """
 
 
@@ -56,7 +55,6 @@ A contiguous chunk of lines to search for in the existing source code. This shou
 The lines to replace into the source code
 </new_code>
 </edit>
-```
 
 The `<new_code>` tag contains the lines that will replace the content matched by `<old_code>`.
 
