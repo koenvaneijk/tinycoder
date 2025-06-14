@@ -23,7 +23,9 @@ TinyCoder is a Python-based tool designed to help you interact with Large Langua
 *   **🧠 Intelligent Context Building:**
     *   **File Management:** Easily add/remove files (`/add`, `/drop`, `/files`).
     *   **Automatic File Identification:** Suggests relevant files to add to the context based on your request (`/ask` for files feature).
-    *   **Repo Map:** Generates a high-level codebase map (`RepoMap`) for broader LLM understanding. Controlled via `/repomap [on|off]`.
+    *   **Repo Map:** Generates a high-level codebase map (`RepoMap`) for broader LLM understanding. Controlled via `/repomap [on|off|show]`.
+    *   **Customizable Repo Map Exclusions:** Fine-tune the `RepoMap` by adding or removing exclusion patterns for files/directories via `/repomap exclude add|remove|list`.
+    *   **Code Snippet Context:** Quickly add specific functions or classes to the context using `@path/to/file.py::EntityName` syntax in your prompts (e.g., `@app.py::MyClass`).
     *   **Smart Prompts:** Constructs detailed prompts using file content and repo structure (`PromptBuilder`).
 *   **🤖 Multiple LLM Support:** Works with **Google Gemini**, **DeepSeek**, **Anthropic**, **Together AI**, and **Ollama**. Configure via `--provider` and `--model` flags, or environment variables (`GEMINI_API_KEY`, `DEEPSEEK_API_KEY`, `ANTHROPIC_API_KEY`, `TOGETHER_API_KEY`).
 *   **✏️ Safe Code Editing:**
@@ -41,8 +43,14 @@ TinyCoder is a Python-based tool designed to help you interact with Large Langua
     *   Define project-specific coding standards (e.g., `style_guide.md`) in `.tinycoder/rules/` (custom) or use built-in rules.
     *   Manage active rules per-project using `/rules list|enable|disable`.
     *   Configuration stored in the user's standard application config directory.
-*   **🧪 Test Runner:** Execute project tests (like `pytest`) using the `/tests` command (`test_runner.py`).
-*   **💾 Chat History:** Persists conversations to `.tinycoder_history` in the user's standard application data directory (`ChatHistoryManager`) and allows resuming with `--continue-chat`.
+*   **🧪 Test Runner:** Execute project unit tests (using Python's `unittest` framework) using the `/tests` command (`test_runner.py`).
+*   **💾 Chat History:** Persists conversations to `tinycoder_chat_history.md` in a `tinycoder` subdirectory within your user's standard application data directory (location varies by OS, e.g., `~/.local/share/tinycoder/` on Linux) (`ChatHistoryManager`) and allows resuming with `--continue-chat`.
+*   **🐳 Docker Integration (Experimental):**
+    *   Helps manage Docker workflows alongside coding changes.
+    *   Can identify affected Docker services based on modified files if a `docker-compose.yml` is present.
+    *   Prompts to rebuild or restart services if live-reload isn't detected (requires Docker and `docker-compose`).
+    *   Provides commands like `/docker ps`, `/docker logs <service>`, `/docker restart <service>`, `/docker build <service>`, and `/docker exec <service> <command>`.
+    *   Warns about files in context that might not be covered by Docker volume mounts.
 *   **⚙️ Command Handling:** Rich set of commands for session control (`CommandHandler`).
 *   **🐚 Shell Execution:** Run shell commands directly using `!<command>`. Output can optionally be added to the chat context.
 *   **📝 Built-in Text Editor:** A simple, integrated text editor (`/edit <filename>`) for quick modifications with features like:
@@ -143,16 +151,25 @@ tinycoder --code "Implement the function foo in service.py using utils.bar"
 *   `/drop <file1> ["file 2"]...`: Remove file(s) from the chat context.
 *   `/files`: List files currently in the chat.
 *   `/suggest_files [instruction]`: Ask the LLM to suggest relevant files. Uses last user message if no instruction.
+*   **Pro Tip for Context:** Use `@path/to/file.py::EntityName` (e.g., `@src/utils.py::helper_function`) in your messages to include specific code snippets directly.
 *   `/edit <filename>`: Open the specified file in a built-in text editor.
 *   `/ask`: Switch to ASK mode (answer questions, no edits).
 *   `/code`: Switch to CODE mode (make edits).
 *   `/commit`: Commit the changes applied by the last successful LLM edit.
 *   `/undo`: Revert the last TinyCoder commit.
-*   `/tests`: Run project tests (e.g., `pytest` in `./tests`).
+*   `/tests`: Run project unit tests (using Python's `unittest` framework in `./tests`).
 *   `/rules list`: List available rules and their status for the project.
 *   `/rules enable <rule_name>`: Enable a specific rule.
 *   `/rules disable <rule_name>`: Disable a specific rule.
 *   `/repomap [on|off|show]`: Enable, disable, or show the inclusion of the repository map in prompts.
+*   `/repomap exclude add <pattern>`: Add a file/directory pattern to exclude from RepoMap.
+*   `/repomap exclude remove <pattern>`: Remove an exclusion pattern.
+*   `/repomap exclude list`: List current exclusion patterns.
+*   `/docker ps`: Show status of docker-compose services.
+*   `/docker logs <service_name>`: Stream logs for a service.
+*   `/docker restart <service_name>`: Restart a service.
+*   `/docker build <service_name>`: Build a service.
+*   `/docker exec <service_name> <command...>`: Execute a command in a service container.
 *   `/clear`: Clear the chat history.
 *   `/reset`: Clear history and remove all files from context.
 *   `/help`: Show help message.
