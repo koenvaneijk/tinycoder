@@ -169,19 +169,27 @@ class DockerManager:
                 if ':' not in line:
                     break  # End of dict block (not a key:value pair)
 
-                key, value_str = line.split(':', 1)
+                key, value_str_raw = line.split(':', 1)
                 key = key.strip()
-                value_str = value_str.strip()
+                value_str = value_str_raw.strip() # Stripped value for logic checks
 
-                if value_str:
-                    node[key] = value_str
+                # Attempt to parse children first.
+                # A child node starts at current_index + 1 and must be more indented than parent_indent (first_indent here).
+                child_node, next_index_after_child = self._build_node(lines, current_index + 1, first_indent)
+
+                if child_node is not None:
+                    node[key] = child_node
+                    current_index = next_index_after_child
+                elif value_str_raw: # If there was anything after ':', even just whitespace (now stripped to value_str)
+                                    # This covers "key: value" and "key: " (value_str is empty) and "key:" (value_str is empty)
+                                    # The critical part is that value_str_raw was not empty, meaning ':' was not at line end.
+                                    # If value_str_raw.strip() is non-empty, use it. Otherwise, if value_str_raw existed (e.g. "key: "), use ""
+                    node[key] = value_str # Assign the stripped value, which could be ""
                     current_index += 1
-                else:
-                    # The value is a nested structure on subsequent lines.
-                    child_node, next_index = self._build_node(lines, current_index + 1, first_indent)
-                    if child_node is not None:
-                        node[key] = child_node
-                    current_index = next_index
+                else: # No child node, and value_str_raw was empty (e.g. "key:" at end of line, or "key:\n")
+                      # This implies ':' was the last non-whitespace char or line ended after ':'.
+                    node[key] = None # Standard representation for an empty YAML value
+                    current_index += 1
             return node, current_index
 
     def find_affected_services(self, modified_files: List[Path]) -> Dict[str, Set[str]]:

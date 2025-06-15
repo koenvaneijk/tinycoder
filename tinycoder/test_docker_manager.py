@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import patch, mock_open, MagicMock
 from pathlib import Path
 import logging
-from typing import Any # Added for type hint in path_exists_logic_wrapper
+# from typing import Any # No longer needed after removing path_exists_logic_wrapper
 
 from tinycoder.docker_manager import DockerManager
 
@@ -27,47 +27,46 @@ class TestDockerManager(unittest.TestCase):
     ) -> DockerManager:
         """Helper to create a DockerManager instance with mocks."""
 
-        def path_exists_logic_wrapper(*args_from_mock: Any) -> bool:
-            """Logic for the mocked Path.exists(), handling potential arg passing issues."""
-            # Expecting args_from_mock[0] to be the Path instance if mock works typically for instance methods.
-            # root_dir, yml_exists, yaml_exists are captured from the outer scope of _create_manager.
-            
-            if not args_from_mock:
-                # This case is triggered if the mock calls the side_effect with no arguments,
-                # which is unexpected for an instance method patch like Path.exists().
-                # This matches the symptom of the TypeError.
-                print("WARNING: Mock for Path.exists was called without passing the Path instance to side_effect.")
-                return False # Default behavior if Path instance is not provided
+        exists_call_results = []
+        if root_dir: # Only prepare results if root_dir is provided, as Path.exists calls depend on it
+            # DockerManager.__init__ logic for compose file:
+            # 1. Checks (root_dir / 'docker-compose.yml').exists()
+            # 2. If 1 is False, it then checks (root_dir / 'docker-compose.yaml').exists()
+            #    after setting self.compose_file to the .yaml path.
+            # 3. Finally, it checks self.compose_file.exists() one more time before parsing.
+            #    This means if .yml exists, sequence is [True, True] for its two checks.
+            #    If .yml no, .yaml yes, sequence is [False, True] for .yml then .yaml.
+            #    If .yml no, .yaml no, sequence is [False, False] for .yml then .yaml.
 
-            path_arg: Path = args_from_mock[0]
+            # Call 1: on 'docker-compose.yml'
+            exists_call_results.append(yml_exists)
 
-            if root_dir is None:
-                return False
-
-            if path_arg == root_dir / 'docker-compose.yml':
-                return yml_exists
-            
-            if path_arg == root_dir / 'docker-compose.yaml':
-                return yaml_exists
-            
-            if path_arg == root_dir:
-                return True 
-
-            return False
+            if yml_exists:
+                # If .yml exists, it's chosen. The final check is on this .yml file.
+                exists_call_results.append(True)
+            else:
+                # If .yml does not exist, .yaml is tried. Call 2 is on 'docker-compose.yaml'.
+                exists_call_results.append(yaml_exists)
+        
+        # If exists_call_results is empty (e.g. root_dir is None), 
+        # Path.exists mock will use default MagicMock behavior if called,
+        # but DockerManager shouldn't call .exists() on compose files in that case.
 
         should_mock_open = (yml_exists or yaml_exists) and compose_content is not None
+        
+        # Ensure that Path.exists is patched with a side_effect that provides enough values
+        # for the expected calls during DockerManager initialization.
+        # If fewer calls are made than items in exists_call_results, it's fine.
+        # If more calls are made, the mock will raise an error after exhausting the list,
+        # or use default MagicMock behavior if side_effect was not a list (not the case here).
+        path_exists_patch = patch('pathlib.Path.exists', side_effect=exists_call_results)
 
         with patch.object(DockerManager, '_check_docker_availability', return_value=check_docker_availability_return), \
-             patch('pathlib.Path.exists', side_effect=path_exists_logic_wrapper) as mock_path_exists_method:
-            
-            # mock_path_exists_method is the MagicMock instance created by patch,
-            # its side_effect is already set.
-
+             path_exists_patch:
             if should_mock_open:
                 with patch('builtins.open', mock_open(read_data=compose_content)):
                     manager = DockerManager(root_dir, self.mock_logger)
             else:
-                # If not mocking open, still initialize DockerManager within the Path.exists patch
                 manager = DockerManager(root_dir, self.mock_logger)
         
         return manager
