@@ -3,7 +3,7 @@ import logging
 from pathlib import Path # Added for globbing
 from typing import TYPE_CHECKING, Callable, Optional, Tuple
 
-from tinycoder.test_runner import run_tests
+from tinycoder.unittest_runner import run_tests
 from tinycoder.editor import launch_editor_cli
 
 if TYPE_CHECKING:
