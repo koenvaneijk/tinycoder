@@ -211,11 +211,11 @@ class CodeApplier:
                             )
                         edited_file_content[rel_path] = new_content_normalized # Update in-memory content
                         self.logger.info(
-                            f"Prepared edit {i+1} for '{COLORS['CYAN']}{rel_path}{RESET}'"
+                            f"Prepared edit {i+1} for {COLORS['CYAN']}{rel_path}{RESET}"
                         )
                     else:
                         self.logger.info(
-                            f"Edit {i+1} for '{COLORS['CYAN']}{rel_path}{RESET}' resulted in no changes to current state."
+                            f"Edit {i+1} for {COLORS['CYAN']}{rel_path}{RESET} resulted in no changes to current state."
                         )
                 
                 if edit_failed_this_iteration:
@@ -223,7 +223,7 @@ class CodeApplier:
 
             except Exception as e:
                 self.logger.error(
-                    f"Unexpected error processing edit {i+1} for '{COLORS['CYAN']}{fname}{RESET}': {e}"
+                    f"Unexpected error processing edit {i+1} for {COLORS['CYAN']}{fname}{RESET}: {e}"
                 )
                 failed_edits_indices.append(i + 1)
 
@@ -233,7 +233,7 @@ class CodeApplier:
             abs_path = self.file_manager.get_abs_path(rel_path)
             if not abs_path:
                 self.logger.error(
-                    f"Cannot resolve path '{COLORS['CYAN']}{rel_path}{RESET}' for writing final changes."
+                    f"Cannot resolve path {COLORS['CYAN']}{rel_path}{RESET} for writing final changes."
                 )
                 write_failed = True
                 continue
@@ -257,18 +257,18 @@ class CodeApplier:
                 needs_write = True
             
             if needs_write:
-                self.logger.info(f"Writing final changes to '{COLORS['CYAN']}{rel_path}{RESET}'...")
+                self.logger.info(f"Writing final changes to {COLORS['CYAN']}{rel_path}{RESET}...")
                 if self.file_manager.write_file(abs_path, final_content_in_memory):
                     modified_files_on_disk.add(rel_path)
                     if rel_path in files_created_in_this_run:
-                        self.logger.info(f"Successfully created/wrote '{COLORS['CYAN']}{rel_path}{RESET}'")
+                        self.logger.info(f"Successfully created/wrote {COLORS['GREEN']}{rel_path}{RESET}")
                     else:
                         self.logger.info(
-                            f"Successfully saved changes to '{COLORS['CYAN']}{rel_path}{RESET}'"
+                            f"Successfully saved changes to {COLORS['GREEN']}{rel_path}{RESET}"
                         )
                 else:
                     self.logger.error(
-                        f"Failed to write final changes to '{COLORS['CYAN']}{rel_path}{RESET}'."
+                        f"Failed to write final changes to {COLORS['RED']}{rel_path}{RESET}."
                     )
                     write_failed = True
 
@@ -300,7 +300,7 @@ class CodeApplier:
 
         if failed_edits_indices:
             self.logger.error(
-                f"Failed to apply edit(s): {', '.join(map(str, sorted(failed_edits_indices)))}"
+                f"Failed to apply edit(s): {COLORS['RED']}{', '.join(map(str, sorted(failed_edits_indices)))}{RESET}"
             )
         return all_succeeded, failed_edits_indices, modified_files_on_disk, lint_errors_found
 
@@ -335,7 +335,7 @@ class CodeApplier:
         if not diff_output:
             return
 
-        self.logger.info(f"--- Diff for '{COLORS['CYAN']}{rel_path}{RESET}' ---")
+        self.logger.info(f"--- Diff for {COLORS['CYAN']}{rel_path}{RESET} ---")
         diff_lines = []
         in_edit_block = False
         found_change = False
@@ -367,4 +367,4 @@ class CodeApplier:
                 diff_lines.append(line)
                 
         self.logger.info("\n".join(diff_lines))
-        self.logger.info(f"--- End Diff for '{COLORS['CYAN']}{rel_path}{RESET}' ---")
+        self.logger.info(f"--- End Diff for {COLORS['CYAN']}{rel_path}{RESET} ---")

@@ -2,6 +2,7 @@ import logging
 import subprocess
 from typing import List, Optional, Tuple
 from pathlib import Path # Added Path import
+from tinycoder.ui.log_formatter import COLORS, RESET
 
 
 class GitManager:
@@ -25,11 +26,6 @@ class GitManager:
             # Warning already logged by _check_git_availability
             pass # git_root remains None
 
-    # Add this helper method (missing before)
-    def io_print_error(self, message: str):
-        """Logs an error message."""
-        self.logger.error(message)
-
     def _check_git_availability(self) -> bool:
         """Checks if the 'git' command is available."""
         try:
@@ -43,17 +39,17 @@ class GitManager:
                 errors="replace",
             )
             if process.returncode == 0:
-                self.logger.debug(f"Git found: {process.stdout.strip()}")
+                self.logger.debug(f"Git found: {COLORS['GREEN']}{process.stdout.strip()}{RESET}")
                 return True
             else:
                 self.logger.warning(
-                    f"Git command check failed (exit code {process.returncode}). Git integration disabled."
+                    f"Git command check failed (exit code {COLORS['YELLOW']}{process.returncode}{RESET}). Git integration disabled."
                 )
-                self.logger.debug(f"Git check stderr: {process.stderr.strip()}")
+                self.logger.debug(f"Git check stderr: {COLORS['YELLOW']}{process.stderr.strip()}{RESET}")
                 return False
         except FileNotFoundError:
             self.logger.warning(
-                "Error: 'git' command not found. Is Git installed and in your PATH? Git integration disabled."
+                f"{COLORS['RED']}Error: 'git' command not found. Is Git installed and in your PATH? Git integration disabled.{RESET}"
             )
             return False
         except Exception as e:
@@ -95,14 +91,12 @@ class GitManager:
             )
             return process.returncode, process.stdout, process.stderr
         except FileNotFoundError:
-            # Use the io_print_error helper
-            self.io_print_error(
-                "Error: 'git' command not found. Is Git installed and in your PATH?"
+            self.logger.error(
+                f"{COLORS['RED']}Error: 'git' command not found. Is Git installed and in your PATH?{RESET}"
             )
             return -1, "", "Git command not found"
         except Exception as e:
-            # Use the io_print_error helper
-            self.io_print_error(f"Error running git command {' '.join(args)}: {e}")
+            self.logger.error(f"{COLORS['RED']}Error running git command {COLORS['CYAN']}{' '.join(args)}{RESET}: {e}{RESET}")
             return -1, "", str(e)
 
     def _find_git_root(self) -> Optional[str]:
@@ -110,7 +104,7 @@ class GitManager:
         cwd = Path.cwd()
         git_dir = cwd / ".git"
         if git_dir.is_dir(): # Check if .git exists and is a directory
-            self.logger.debug(f"Found .git directory at: {cwd}")
+            self.logger.debug(f"Found .git directory at: {COLORS['GREEN']}{cwd}{RESET}")
             return str(cwd)
         else:
             self.logger.debug(f"No .git directory found in current directory: {cwd}")
@@ -120,26 +114,26 @@ class GitManager:
         """Initializes a git repository in the current working directory."""
         # Ensure git is available before attempting init
         if not self.git_available:
-            self.io_print_error("Cannot initialize repository: Git command is not available.")
+            self.logger.error(f"{COLORS['RED']}Cannot initialize repository: Git command is not available.{RESET}")
             return False
 
         cwd = Path.cwd()
-        self.logger.info(f"Attempting to initialize Git repository in {cwd}...")
+        self.logger.info(f"Attempting to initialize Git repository in {COLORS['CYAN']}{cwd}{RESET}...")
         # Run 'git init' in the current working directory, explicitly set cwd
         exit_code, stdout, stderr = self._run_git_command(["init"], cwd=str(cwd))
 
         if exit_code == 0:
-            self.logger.info(f"Successfully initialized Git repository in {cwd}.")
+            self.logger.info(f"Successfully initialized Git repository in {COLORS['GREEN']}{cwd}{RESET}.")
             # Re-check and set the root after successful initialization
             self.git_root = self._find_git_root() # Should now find it
             if not self.git_root: # Defensive check, should not happen if init succeeded
-                 self.io_print_error("Git init succeeded but failed to confirm .git directory afterwards.")
+                 self.logger.error(f"{COLORS['RED']}Git init succeeded but failed to confirm .git directory afterwards.{RESET}")
                  return False
             # Check config *after* successful initialization and root confirmation
             self._check_and_configure_git_user()
             return True
         else:
-            self.io_print_error(f"Failed to initialize Git repository: {stderr.strip()}")
+            self.logger.error(f"{COLORS['RED']}Failed to initialize Git repository: {stderr.strip()}{RESET}")
             self.git_root = None # Ensure root is None on failure
             return False
 
@@ -166,21 +160,21 @@ class GitManager:
             ret, stdout, stderr = self._run_git_command(["config", config_key])
             # Check if return code is non-zero (config not found) or if output is empty/whitespace
             if ret != 0 or not stdout.strip():
-                self.logger.warning(f"Git configuration '{config_key}' is not set.")
+                self.logger.warning(f"Git configuration '{COLORS['YELLOW']}{config_key}{RESET}' is not set.")
                 while True:
                     try:
                         # Prompt user for input using standard input
-                        value = input(f"Please enter your git {config_key} (e.g., {prompt_placeholder}): ").strip()
+                        value = input(f"Please enter your git {COLORS['YELLOW']}{config_key}{RESET} (e.g., {prompt_placeholder}): ").strip()
                         if value:
                             configs_to_set[config_key] = value
                             break # Exit inner loop once valid input is received
                         else:
-                            print("Input cannot be empty. Please try again.")
+                            print(f"{COLORS['RED']}Input cannot be empty. Please try again.{RESET}")
                     except EOFError:
-                         print("\nInput stream closed. Cannot set git configuration.")
+                         print(f"\n{COLORS['YELLOW']}Input stream closed. Cannot set git configuration.{RESET}")
                          return # Exit config check if input fails
                     except KeyboardInterrupt:
-                         print("\nOperation cancelled by user. Git configuration not set.")
+                         print(f"\n{COLORS['YELLOW']}Operation cancelled by user. Git configuration not set.{RESET}")
                          return # Exit config check if user cancels
 
         # Set the configurations globally if any were collected
@@ -188,9 +182,9 @@ class GitManager:
             # Use --global to set it for the user across all repos
             ret_set, _, stderr_set = self._run_git_command(["config", "--global", config_key, value])
             if ret_set == 0:
-                 self.logger.info(f"Successfully set global git config: {config_key}='{value}'")
+                 self.logger.info(f"Successfully set global git config: {COLORS['GREEN']}{config_key}='{value}'{RESET}")
             else:
-                 self.io_print_error(f"Failed to set global git config {config_key}: {stderr_set}")
+                 self.logger.error(f"{COLORS['RED']}Failed to set global git config {config_key}: {stderr_set}{RESET}")
                  # Continue trying to set others if needed, but log the error
 
     def get_last_commit_hash(self) -> Optional[str]:
@@ -207,10 +201,10 @@ class GitManager:
 
         if ret == 0:
             files = [line.strip() for line in stdout.splitlines() if line.strip()]
-            self.logger.debug(f"Found {len(files)} tracked files via 'git ls-files'.")
+            self.logger.debug(f"Found {COLORS['GREEN']}{len(files)}{RESET} tracked files via 'git ls-files'.")
             return files
         else:
-            self.io_print_error(f"Failed to list tracked files using 'git ls-files': {stderr.strip()}")
+            self.logger.error(f"{COLORS['RED']}Failed to list tracked files using 'git ls-files': {stderr.strip()}{RESET}")
             return []
 
     def get_last_commit_hash(self) -> Optional[str]:
@@ -221,7 +215,7 @@ class GitManager:
         if ret == 0:
             return stdout.strip()
         else:
-            self.io_print_error(f"Failed to get last commit hash: {stderr}")
+            self.logger.error(f"{COLORS['RED']}Failed to get last commit hash: {stderr}{RESET}")
             return None
 
     def get_files_changed_in_commit(self, commit_hash: str) -> List[str]:
@@ -235,8 +229,8 @@ class GitManager:
             # Ensure paths are relative to the git root
             return [f.strip() for f in stdout.splitlines() if f.strip()]
         else:
-            self.io_print_error(
-                f"Failed to get files for commit {commit_hash}: {stderr}"
+            self.logger.error(
+                f"{COLORS['RED']}Failed to get files for commit {COLORS['YELLOW']}{commit_hash}{RESET}: {stderr}{RESET}"
             )
             return []
 
@@ -245,10 +239,10 @@ class GitManager:
     ) -> Optional[str]:
         """Stages and commits specified files. Returns commit hash on success."""
         if not self.is_repo():
-            self.io_print_error("Not in a git repository, cannot commit.")
+            self.logger.error(f"{COLORS['RED']}Not in a git repository, cannot commit.{RESET}")
             return None
         if not files_abs:
-            self.io_print_error("No files provided to commit.")
+            self.logger.error(f"{COLORS['RED']}No files provided to commit.{RESET}")
             return None
 
         # Check status of the specific files we might commit
@@ -256,7 +250,7 @@ class GitManager:
             ["status", "--porcelain", "--"] + files_abs
         )
         if ret != 0:
-            self.io_print_error(f"Git status check failed for files: {stderr}")
+            self.logger.error(f"{COLORS['RED']}Git status check failed for files: {stderr}{RESET}")
             return None
         if not stdout.strip():
             self.logger.info(
@@ -267,9 +261,9 @@ class GitManager:
         # Stage the files
         ret, _, stderr = self._run_git_command(["add", "--"] + files_abs)
         if ret != 0:
-            self.io_print_error(f"Failed to git add files: {stderr}")
+            self.logger.error(f"{COLORS['RED']}Failed to git add files: {stderr}{RESET}")
             return None
-        self.logger.info(f"GIT: Staged changes for: {', '.join(sorted(files_rel))}")
+        self.logger.info(f"GIT: Staged changes for: {COLORS['CYAN']}{', '.join(sorted(files_rel))}{RESET}")
 
         # Commit
         ret, stdout_commit, stderr_commit = self._run_git_command(
@@ -283,15 +277,15 @@ class GitManager:
                 self.logger.info("No changes staged to commit.")
                 return None
             else:
-                self.io_print_error(
-                    f"Git commit failed:\nstdout: {stdout_commit}\nstderr: {stderr_commit}"
+                self.logger.error(
+                    f"{COLORS['RED']}Git commit failed:\nstdout: {stdout_commit}\nstderr: {stderr_commit}{RESET}"
                 )
                 return None
 
         # Get the commit hash
         commit_hash = self.get_last_commit_hash()
         if commit_hash:
-            self.logger.info(f"Committed changes as {commit_hash}")
+            self.logger.info(f"Committed changes as {COLORS['GREEN']}{commit_hash}{RESET}")
             return commit_hash
         else:
             # Error getting hash already printed by get_last_commit_hash
@@ -300,7 +294,7 @@ class GitManager:
     def undo_last_commit(self, expected_hash: str) -> bool:
         """Undo the last commit if it matches the expected hash."""
         if not self.is_repo():
-            self.io_print_error("Not in a git repository.")
+            self.logger.error(f"{COLORS['RED']}Not in a git repository.{RESET}")
             return False
 
         last_hash = self.get_last_commit_hash()
@@ -309,8 +303,8 @@ class GitManager:
             return False
 
         if last_hash != expected_hash:
-            self.io_print_error(
-                f"Last commit hash {last_hash} does not match expected {expected_hash}."
+            self.logger.error(
+                f"{COLORS['RED']}Last commit hash {COLORS['YELLOW']}{last_hash}{RESET} does not match expected {COLORS['YELLOW']}{expected_hash}{RESET}.{RESET}"
             )
             # Consider adding info about manual reset here if desired
             return False
@@ -319,14 +313,14 @@ class GitManager:
         relative_files_to_revert = self.get_files_changed_in_commit(last_hash)
         if not relative_files_to_revert:
             self.logger.warning(
-                f"Could not determine files changed in commit {last_hash}. Attempting reset without checkout.",
+                f"{COLORS['YELLOW']}Could not determine files changed in commit {COLORS['YELLOW']}{last_hash}{RESET}. Attempting reset without checkout.{RESET}",
             )
             # Proceed with soft reset only
 
         # Soft reset first - moves HEAD back but keeps changes staged
         ret, _, stderr = self._run_git_command(["reset", "--soft", "HEAD~1"])
         if ret != 0:
-            self.io_print_error(f"Git soft reset failed: {stderr}")
+            self.logger.error(f"{COLORS['RED']}Git soft reset failed: {stderr}{RESET}")
             return False
 
         # If we know which files were changed, check them out from the previous state
@@ -336,23 +330,23 @@ class GitManager:
                 ["checkout", "HEAD~1", "--"] + relative_files_to_revert
             )
             if ret != 0:
-                self.io_print_error(
-                    f"Git checkout failed for reverting files: {stderr}"
+                self.logger.error(
+                    f"{COLORS['RED']}Git checkout failed for reverting files: {stderr}{RESET}"
                 )
                 self.logger.warning(
-                    "Undo failed after soft reset. Repository state might be inconsistent. Files remain staged.",
+                    f"{COLORS['YELLOW']}Undo failed after soft reset. Repository state might be inconsistent. Files remain staged.{RESET}",
                 )
                 return False  # Indicate failure even though soft reset worked
             else:
                 new_hash = self.get_last_commit_hash()
                 self.logger.info(
-                    f"Successfully undid commit {last_hash}. Content reverted. Current HEAD is now {new_hash}.",
+                    f"Successfully undid commit {COLORS['YELLOW']}{last_hash}{RESET}. Content reverted. Current HEAD is now {COLORS['GREEN']}{new_hash}{RESET}.",
                 )
                 return True  # Success
         else:
             # Files to revert unknown, soft reset done, inform user
             new_hash = self.get_last_commit_hash()
             self.logger.info(
-                f"Successfully reset HEAD past commit {last_hash}. Files remain staged. Current HEAD is now {new_hash}.",
+                f"Successfully reset HEAD past commit {COLORS['YELLOW']}{last_hash}{RESET}. Files remain staged. Current HEAD is now {COLORS['GREEN']}{new_hash}{RESET}.",
             )
             return True  # Indicate success (soft reset worked)
