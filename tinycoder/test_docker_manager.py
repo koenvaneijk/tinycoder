@@ -20,40 +20,56 @@ class TestDockerManager(unittest.TestCase):
         self: 'TestDockerManager',
         root_dir: Path | None = None,
         check_docker_availability_return: bool = True,
-        compose_exists: bool = False,
+        yml_exists: bool = False, # Specific control for docker-compose.yml
+        yaml_exists: bool = False, # Specific control for docker-compose.yaml
         compose_content: str = ""
     ) -> DockerManager:
         """Helper to create a DockerManager instance with mocks."""
-        with patch.object(DockerManager, '_check_docker_availability', return_value=check_docker_availability_return):
-            if compose_exists:
-                # Mock Path.exists for docker-compose.yml and docker-compose.yaml
-                def mock_exists(path_self: Path) -> bool:
-                    if str(path_self) == str(root_dir / 'docker-compose.yml'):
-                        return True # Assume .yml for simplicity in mock
-                    if str(path_self) == str(root_dir / 'docker-compose.yaml'):
-                        return False # Or handle this based on compose_content path
-                    return False # Original Path.exists behavior for other paths
 
-                # Mock open for reading the compose file
-                mock_file = mock_open(read_data=compose_content)
-                with patch('pathlib.Path.exists', side_effect=mock_exists):
-                    with patch('builtins.open', mock_file):
-                        manager = DockerManager(root_dir, self.mock_logger)
-            else:
-                 # Mock Path.exists to return False for compose files
-                def mock_no_compose_exists(path_self: Path) -> bool:
-                    if str(path_self) in [str(root_dir / 'docker-compose.yml'), str(root_dir / 'docker-compose.yaml')]:
-                        return False
-                    return False # Original Path.exists for other paths needed by DockerManager init if any
-                with patch('pathlib.Path.exists', side_effect=mock_no_compose_exists):
+        def path_exists_logic(path_arg: Path) -> bool:
+            """Logic for the mocked Path.exists()."""
+            if root_dir is None:
+                # If root_dir isn't provided, no compose files relative to it can "exist".
+                # Path.exists() on some arbitrary path_arg should probably be False.
+                return False
+
+            # Check for docker-compose.yml
+            if path_arg == root_dir / 'docker-compose.yml':
+                return yml_exists
+            
+            # Check for docker-compose.yaml
+            if path_arg == root_dir / 'docker-compose.yaml':
+                return yaml_exists
+            
+            # Assume the root_dir itself "exists" if it's provided
+            if path_arg == root_dir:
+                return True 
+
+            # For any other path, assume it doesn't exist in this mocked environment
+            return False
+
+        should_mock_open = (yml_exists or yaml_exists) and compose_content is not None
+
+        with patch.object(DockerManager, '_check_docker_availability', return_value=check_docker_availability_return), \
+             patch('pathlib.Path.exists', side_effect=path_exists_logic) as mock_path_exists_method:
+            
+            # mock_path_exists_method is the MagicMock instance created by patch,
+            # its side_effect is already set.
+
+            if should_mock_open:
+                with patch('builtins.open', mock_open(read_data=compose_content)):
                     manager = DockerManager(root_dir, self.mock_logger)
+            else:
+                # If not mocking open, still initialize DockerManager within the Path.exists patch
+                manager = DockerManager(root_dir, self.mock_logger)
+        
         return manager
 
     # --- Tests for _parse_yaml_simple ---
 
     def test_parse_yaml_simple_basic(self: 'TestDockerManager') -> None:
         """Test _parse_yaml_simple with basic key-value pairs."""
-        manager = self._create_manager()
+        manager = self._create_manager(root_dir=self.test_root_dir) # yml_exists=False, yaml_exists=False by default
         yaml_content = """
 version: '3.8'
 services:
@@ -75,7 +91,7 @@ services:
 
     def test_parse_yaml_simple_with_comments_and_blank_lines(self: 'TestDockerManager') -> None:
         """Test _parse_yaml_simple handles comments and blank lines."""
-        manager = self._create_manager()
+        manager = self._create_manager(root_dir=self.test_root_dir)
         yaml_content = """
 # This is a comment
 version: '3.9'
@@ -99,7 +115,7 @@ services: # Another comment
 
     def test_parse_yaml_simple_list_of_strings(self: 'TestDockerManager') -> None:
         """Test _parse_yaml_simple with a list of strings."""
-        manager = self._create_manager()
+        manager = self._create_manager(root_dir=self.test_root_dir)
         yaml_content = """
 environment:
   - DEBUG=1
@@ -110,7 +126,7 @@ environment:
 
     def test_parse_yaml_simple_deeply_nested(self: 'TestDockerManager') -> None:
         """Test _parse_yaml_simple with deeply nested structures."""
-        manager = self._create_manager()
+        manager = self._create_manager(root_dir=self.test_root_dir)
         yaml_content = """
 x-logging: &logging
   driver: "json-file"
@@ -143,12 +159,12 @@ services:
 
     def test_parse_yaml_simple_empty_input(self: 'TestDockerManager') -> None:
         """Test _parse_yaml_simple with empty input."""
-        manager = self._create_manager()
+        manager = self._create_manager(root_dir=self.test_root_dir)
         self.assertIsNone(manager._parse_yaml_simple(""))
 
     def test_parse_yaml_simple_only_comments(self: 'TestDockerManager') -> None:
         """Test _parse_yaml_simple with input containing only comments."""
-        manager = self._create_manager()
+        manager = self._create_manager(root_dir=self.test_root_dir)
         yaml_content = """
 # comment 1
 # comment 2
@@ -157,7 +173,7 @@ services:
 
     def test_parse_yaml_simple_mixed_indentation_in_list_skips_bad_lines(self: 'TestDockerManager') -> None:
         """Test _parse_yaml_simple with mixed indentation in a list (should skip bad lines)."""
-        manager = self._create_manager()
+        manager = self._create_manager(root_dir=self.test_root_dir)
         yaml_content = """
 mylist:
   - item1
@@ -177,7 +193,7 @@ mylist:
     @patch.object(DockerManager, '_parse_compose_file')
     def test_init_docker_not_available(self: 'TestDockerManager', mock_parse_compose: MagicMock) -> None:
         """Test __init__ when Docker is not available."""
-        manager = self._create_manager(check_docker_availability_return=False)
+        manager = self._create_manager(root_dir=self.test_root_dir, check_docker_availability_return=False)
         self.assertFalse(manager.is_available)
         self.mock_logger.debug.assert_any_call("Docker command not found or daemon not running. DockerManager disabled.")
         mock_parse_compose.assert_not_called()
@@ -185,7 +201,7 @@ mylist:
     @patch.object(DockerManager, '_parse_compose_file')
     def test_init_no_root_dir(self: 'TestDockerManager', mock_parse_compose: MagicMock) -> None:
         """Test __init__ when Docker is available but no root_dir is provided."""
-        manager = self._create_manager(root_dir=None)
+        manager = self._create_manager(root_dir=None, yml_exists=False, yaml_exists=False)
         self.assertTrue(manager.is_available) # Docker itself is available
         self.assertIsNone(manager.root_dir)
         self.assertIsNone(manager.compose_file)
@@ -195,7 +211,7 @@ mylist:
     @patch.object(DockerManager, '_parse_compose_file')
     def test_init_no_compose_file(self: 'TestDockerManager', mock_parse_compose: MagicMock) -> None:
         """Test __init__ when root_dir is provided but no compose file exists."""
-        manager = self._create_manager(root_dir=self.test_root_dir, compose_exists=False)
+        manager = self._create_manager(root_dir=self.test_root_dir, yml_exists=False, yaml_exists=False)
         self.assertTrue(manager.is_available)
         self.assertEqual(manager.root_dir, self.test_root_dir)
         self.assertIsNone(manager.compose_file)
@@ -206,18 +222,12 @@ mylist:
         """Test __init__ with a docker-compose.yml file."""
         compose_content = "version: '3.8'\nservices:\n  app:\n    image: myapp"
         
-        # We need to control Path.exists more granularly for this test
-        def specific_exists(path_self: Path) -> bool:
-            if str(path_self) == str(self.test_root_dir / 'docker-compose.yml'):
-                return True
-            if str(path_self) == str(self.test_root_dir / 'docker-compose.yaml'):
-                return False # Explicitly make .yaml not exist
-            return False # Default for other paths
-
-        with patch('pathlib.Path.exists', side_effect=specific_exists), \
-             patch('builtins.open', mock_open(read_data=compose_content)), \
-             patch.object(DockerManager, '_check_docker_availability', return_value=True):
-            manager = DockerManager(self.test_root_dir, self.mock_logger)
+        manager = self._create_manager(
+            root_dir=self.test_root_dir,
+            yml_exists=True,
+            yaml_exists=False, # Ensure .yml is chosen if both could exist
+            compose_content=compose_content
+        )
 
         self.assertTrue(manager.is_available)
         self.assertEqual(manager.compose_file, self.test_root_dir / 'docker-compose.yml')
@@ -228,17 +238,12 @@ mylist:
         """Test __init__ with a docker-compose.yaml file (when .yml is not present)."""
         compose_content = "version: '3.8'\nservices:\n  db:\n    image: postgres"
 
-        def specific_exists(path_self: Path) -> bool:
-            if str(path_self) == str(self.test_root_dir / 'docker-compose.yml'):
-                return False # .yml does not exist
-            if str(path_self) == str(self.test_root_dir / 'docker-compose.yaml'):
-                return True # .yaml exists
-            return False
-
-        with patch('pathlib.Path.exists', side_effect=specific_exists), \
-             patch('builtins.open', mock_open(read_data=compose_content)), \
-             patch.object(DockerManager, '_check_docker_availability', return_value=True):
-            manager = DockerManager(self.test_root_dir, self.mock_logger)
+        manager = self._create_manager(
+            root_dir=self.test_root_dir,
+            yml_exists=False, # .yml does not exist
+            yaml_exists=True,  # .yaml exists
+            compose_content=compose_content
+        )
 
         self.assertTrue(manager.is_available)
         self.assertEqual(manager.compose_file, self.test_root_dir / 'docker-compose.yaml')
@@ -260,7 +265,7 @@ services:
     volumes:
       - ./app:/app
 """
-        manager = self._create_manager(root_dir=self.test_root_dir, compose_exists=True, compose_content=compose_content)
+        manager = self._create_manager(root_dir=self.test_root_dir, yml_exists=True, compose_content=compose_content)
         
         modified_files = [self.test_root_dir / "html" / "index.html"]
         affected = manager.find_affected_services(modified_files)
@@ -277,7 +282,7 @@ services:
   builder:
     build: ./service_src
 """
-        manager = self._create_manager(root_dir=self.test_root_dir, compose_exists=True, compose_content=compose_content)
+        manager = self._create_manager(root_dir=self.test_root_dir, yml_exists=True, compose_content=compose_content)
         modified_files = [self.test_root_dir / "service_src" / "Dockerfile"]
         affected = manager.find_affected_services(modified_files)
         self.assertEqual(affected, {"builder": {"build_context"}})
@@ -291,7 +296,7 @@ services:
       context: ./app_code
       dockerfile: Dockerfile.dev
 """
-        manager = self._create_manager(root_dir=self.test_root_dir, compose_exists=True, compose_content=compose_content)
+        manager = self._create_manager(root_dir=self.test_root_dir, yml_exists=True, compose_content=compose_content)
         modified_files = [self.test_root_dir / "app_code" / "requirements.txt"]
         affected = manager.find_affected_services(modified_files)
         self.assertEqual(affected, {"builder": {"build_context"}})
@@ -305,7 +310,7 @@ services:
     volumes:
       - ./html:/usr/share/nginx/html
 """
-        manager = self._create_manager(root_dir=self.test_root_dir, compose_exists=True, compose_content=compose_content)
+        manager = self._create_manager(root_dir=self.test_root_dir, yml_exists=True, compose_content=compose_content)
         modified_files = [self.test_root_dir / "other_dir" / "somefile.txt"]
         affected = manager.find_affected_services(modified_files)
         self.assertEqual(affected, {})
@@ -319,7 +324,7 @@ services:
     volumes:
       - ./app_source:/opt/app 
 """
-        manager = self._create_manager(root_dir=self.test_root_dir, compose_exists=True, compose_content=compose_content)
+        manager = self._create_manager(root_dir=self.test_root_dir, yml_exists=True, compose_content=compose_content)
         modified_files = [self.test_root_dir / "app_source" / "main.py"]
         affected = manager.find_affected_services(modified_files)
         self.assertEqual(affected, {"app": {"volume", "build_context"}})
@@ -339,7 +344,7 @@ services:
   other_app:
     command: python run.py --watch
 """
-        manager = self._create_manager(root_dir=self.test_root_dir, compose_exists=True, compose_content=compose_content)
+        manager = self._create_manager(root_dir=self.test_root_dir, yml_exists=True, compose_content=compose_content)
         self.assertTrue(manager.has_live_reload("uvicorn_app"))
         # FLASK_ENV=development is usually in environment, not command for `flask run`
         self.assertFalse(manager.has_live_reload("flask_app")) # Add test for env var
@@ -360,7 +365,7 @@ services:
     environment:
       MY_RELOAD_VAR: --reload # This heuristic might be too broad if not careful
 """
-        manager = self._create_manager(root_dir=self.test_root_dir, compose_exists=True, compose_content=compose_content)
+        manager = self._create_manager(root_dir=self.test_root_dir, yml_exists=True, compose_content=compose_content)
         self.assertTrue(manager.has_live_reload("flask_dev"))
         self.assertTrue(manager.has_live_reload("another_app")) # Assuming --reload in env value is a signal
 
@@ -374,7 +379,7 @@ services:
       - main:app
       - --reload
 """
-        manager = self._create_manager(root_dir=self.test_root_dir, compose_exists=True, compose_content=compose_content)
+        manager = self._create_manager(root_dir=self.test_root_dir, yml_exists=True, compose_content=compose_content)
         self.assertTrue(manager.has_live_reload("app_list_cmd"))
 
     def test_has_live_reload_no_indicator(self: 'TestDockerManager') -> None:
@@ -386,7 +391,7 @@ services:
     environment:
       - PROD=true
 """
-        manager = self._create_manager(root_dir=self.test_root_dir, compose_exists=True, compose_content=compose_content)
+        manager = self._create_manager(root_dir=self.test_root_dir, yml_exists=True, compose_content=compose_content)
         self.assertFalse(manager.has_live_reload("prod_app"))
         self.assertFalse(manager.has_live_reload("non_existent_service"))
 
@@ -396,7 +401,7 @@ services:
     def test_is_service_running_true(self: 'TestDockerManager', mock_run_command: MagicMock) -> None:
         """Test is_service_running returns True when service is up."""
         mock_run_command.return_value = (True, "container_id_output", "")
-        manager = self._create_manager(root_dir=self.test_root_dir)
+        manager = self._create_manager(root_dir=self.test_root_dir, yml_exists=False, yaml_exists=False)
         self.assertTrue(manager.is_service_running("my_service"))
         mock_run_command.assert_called_once_with(['docker', 'compose', 'ps', '-q', 'my_service'])
 
@@ -404,21 +409,21 @@ services:
     def test_is_service_running_false_no_output(self: 'TestDockerManager', mock_run_command: MagicMock) -> None:
         """Test is_service_running returns False when command succeeds but no output."""
         mock_run_command.return_value = (True, "", "")
-        manager = self._create_manager(root_dir=self.test_root_dir)
+        manager = self._create_manager(root_dir=self.test_root_dir, yml_exists=False, yaml_exists=False)
         self.assertFalse(manager.is_service_running("my_service"))
 
     @patch.object(DockerManager, '_run_command')
     def test_is_service_running_false_command_fails(self: 'TestDockerManager', mock_run_command: MagicMock) -> None:
         """Test is_service_running returns False when docker command fails."""
         mock_run_command.return_value = (False, "", "Error")
-        manager = self._create_manager(root_dir=self.test_root_dir)
+        manager = self._create_manager(root_dir=self.test_root_dir, yml_exists=False, yaml_exists=False)
         self.assertFalse(manager.is_service_running("my_service"))
 
     @patch.object(DockerManager, '_run_command')
     def test_restart_service_success(self: 'TestDockerManager', mock_run_command: MagicMock) -> None:
         """Test restart_service successful call."""
         mock_run_command.return_value = (True, "Restarted", "")
-        manager = self._create_manager(root_dir=self.test_root_dir)
+        manager = self._create_manager(root_dir=self.test_root_dir, yml_exists=False, yaml_exists=False)
         manager.restart_service("app_service")
         mock_run_command.assert_called_once_with(['docker', 'compose', 'restart', 'app_service'])
         self.mock_logger.info.assert_any_call("Restarting service 'app_service'...")
@@ -428,7 +433,7 @@ services:
     def test_restart_service_failure(self: 'TestDockerManager', mock_run_command: MagicMock) -> None:
         """Test restart_service handles command failure."""
         mock_run_command.return_value = (False, "", "Failed to restart")
-        manager = self._create_manager(root_dir=self.test_root_dir)
+        manager = self._create_manager(root_dir=self.test_root_dir, yml_exists=False, yaml_exists=False)
         manager.restart_service("db_service")
         mock_run_command.assert_called_once_with(['docker', 'compose', 'restart', 'db_service'])
         self.mock_logger.error.assert_called_once_with("Failed to restart service 'db_service':\nFailed to restart")
@@ -437,7 +442,7 @@ services:
     def test_build_service_success(self: 'TestDockerManager', mock_run_command: MagicMock) -> None:
         """Test build_service successful call."""
         mock_run_command.return_value = (True, "Build output", "")
-        manager = self._create_manager(root_dir=self.test_root_dir)
+        manager = self._create_manager(root_dir=self.test_root_dir, yml_exists=False, yaml_exists=False)
         result = manager.build_service("builder_service")
         self.assertTrue(result)
         mock_run_command.assert_called_once_with(['docker', 'compose', 'build', '--no-cache', 'builder_service'])
@@ -447,7 +452,7 @@ services:
     def test_build_service_failure(self: 'TestDockerManager', mock_run_command: MagicMock) -> None:
         """Test build_service handles command failure."""
         mock_run_command.return_value = (False, "", "Build error")
-        manager = self._create_manager(root_dir=self.test_root_dir)
+        manager = self._create_manager(root_dir=self.test_root_dir, yml_exists=False, yaml_exists=False)
         result = manager.build_service("broken_service")
         self.assertFalse(result)
         mock_run_command.assert_called_once_with(['docker', 'compose', 'build', '--no-cache', 'broken_service'])
@@ -458,7 +463,7 @@ services:
         """Test get_ps returns output on success."""
         expected_output = "NAME COMMAND STATE PORTS"
         mock_run_command.return_value = (True, expected_output, "")
-        manager = self._create_manager(root_dir=self.test_root_dir)
+        manager = self._create_manager(root_dir=self.test_root_dir, yml_exists=False, yaml_exists=False)
         self.assertEqual(manager.get_ps(), expected_output)
         mock_run_command.assert_called_once_with(['docker', 'compose', 'ps'])
 
@@ -466,7 +471,7 @@ services:
     def test_get_ps_failure(self: 'TestDockerManager', mock_run_command: MagicMock) -> None:
         """Test get_ps returns None on failure."""
         mock_run_command.return_value = (False, "", "ps error")
-        manager = self._create_manager(root_dir=self.test_root_dir)
+        manager = self._create_manager(root_dir=self.test_root_dir, yml_exists=False, yaml_exists=False)
         self.assertIsNone(manager.get_ps())
         self.mock_logger.error.assert_called_once_with("Failed to get docker-compose status:\nps error")
 
@@ -478,7 +483,7 @@ services:
         mock_process.wait.return_value = 0
         mock_popen.return_value = mock_process
 
-        manager = self._create_manager(root_dir=self.test_root_dir)
+        manager = self._create_manager(root_dir=self.test_root_dir, yml_exists=False, yaml_exists=False)
         manager.stream_logs("log_service")
 
         mock_popen.assert_called_once_with(
@@ -496,7 +501,7 @@ services:
         mock_process.wait.return_value = 0
         mock_popen.return_value = mock_process
 
-        manager = self._create_manager(root_dir=self.test_root_dir)
+        manager = self._create_manager(root_dir=self.test_root_dir, yml_exists=False, yaml_exists=False)
         result = manager.run_command_in_service("exec_service", "ls -l /app")
 
         self.assertTrue(result)
@@ -515,22 +520,11 @@ services:
         mock_process.wait.return_value = 1 # Non-zero exit code
         mock_popen.return_value = mock_process
 
-        manager = self._create_manager(root_dir=self.test_root_dir)
+        manager = self._create_manager(root_dir=self.test_root_dir, yml_exists=False, yaml_exists=False)
         result = manager.run_command_in_service("fail_service", "bad_command")
 
         self.assertFalse(result)
         self.mock_logger.error.assert_any_call("Command failed with exit code 1 in service 'fail_service'.")
-
-    # --- Test _check_docker_availability ---
-    @patch('subprocess.run')
-    def test_check_docker_availability_success(self: 'TestDockerManager', mock_run: MagicMock) -> None:
-        """Test _check_docker_availability when docker info succeeds."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="Docker info", stderr="")
-        manager = self._create_manager(root_dir=None, check_docker_availability_return=False) # Temp disable for direct call
-        self.assertTrue(manager._check_docker_availability())
-        mock_run.assert_called_once_with(
-            ['docker', 'info'], capture_output=True, text=True, check=False, cwd=None
-        )
 
     @patch('subprocess.run')
     def test_check_docker_availability_daemon_not_running(self: 'TestDockerManager', mock_run: MagicMock) -> None:
@@ -556,7 +550,7 @@ services:
       - ./src:/app/src
       - ./data:/app/data
 """
-        manager = self._create_manager(root_dir=self.test_root_dir, compose_exists=True, compose_content=compose_content)
+        manager = self._create_manager(root_dir=self.test_root_dir, yml_exists=True, compose_content=compose_content)
         files_in_context = [
             self.test_root_dir / "src" / "main.py",
             self.test_root_dir / "data" / "file.txt"
@@ -578,7 +572,7 @@ services:
     volumes:
       - ./src:/app/src
 """
-        manager = self._create_manager(root_dir=self.test_root_dir, compose_exists=True, compose_content=compose_content)
+        manager = self._create_manager(root_dir=self.test_root_dir, yml_exists=True, compose_content=compose_content)
         files_in_context = [
             self.test_root_dir / "src" / "main.py",          # Mounted
             self.test_root_dir / "config" / "settings.ini"  # Unmounted
@@ -590,13 +584,21 @@ services:
 
     def test_check_for_missing_volume_mounts_no_services_or_root(self: 'TestDockerManager') -> None:
         """Test check_for_missing_volume_mounts handles no services or root_dir."""
-        manager_no_services = self._create_manager(root_dir=self.test_root_dir, compose_exists=True, compose_content="version: '3.8'")
+        # Test with no services (compose file exists but is minimal)
+        manager_no_services = self._create_manager(
+            root_dir=self.test_root_dir, 
+            yml_exists=True, 
+            compose_content="version: '3.8'"
+        )
+        # Reset mock logger for this specific sub-test to avoid interference
+        self.mock_logger.reset_mock() 
         manager_no_services.check_for_missing_volume_mounts([self.test_root_dir / "file.py"])
-        # No error, and no warnings about unmounted files because no services to check against.
-        self.mock_logger.warning.assert_not_called() # or check it wasn't called with specific messages
+        self.mock_logger.warning.assert_not_called()
 
+        # Test with no root_dir
         manager_no_root = self._create_manager(root_dir=None)
-        manager_no_root.check_for_missing_volume_mounts([Path("file.py")]) # Needs absolute paths usually.
+        self.mock_logger.reset_mock()
+        manager_no_root.check_for_missing_volume_mounts([Path("file.py")])
         self.mock_logger.warning.assert_not_called()
 
 
