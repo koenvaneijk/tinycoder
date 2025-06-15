@@ -433,23 +433,36 @@ class RepoMap:
             if rel_path_str in chat_files_rel:
                 continue  # Skip files already in chat
 
-            definitions = self.get_definitions(file_path)
-            if definitions:
-                file_map_lines = []
-                
-                module_docstring_line_str = ""
-                # Check if the first definition is a module docstring
-                if definitions and definitions[0][0] == "Module":
-                    module_entry = definitions.pop(0) # ("Module", filename, 0, docstring)
-                    if len(module_entry) > 3 and module_entry[3]: # Check if docstring exists
-                        module_docstring_line_str = f" # {module_entry[3]}"
-                
-                file_map_lines.append(f"\n`{rel_path_str}`:{module_docstring_line_str}")
+            is_test_file = file_path.name.startswith("test_") and file_path.name.endswith(".py")
+            all_file_definitions = self.get_definitions(file_path)
+
+            current_file_map_lines_for_this_file = []
+            module_docstring_line_str = ""
+            definitions_to_process_further = all_file_definitions
+
+            if all_file_definitions and all_file_definitions[0][0] == "Module":
+                module_entry = all_file_definitions[0]
+                if len(module_entry) > 3 and module_entry[3]: # Check if docstring exists
+                    module_docstring_line_str = f" # {module_entry[3]}"
+                definitions_to_process_further = all_file_definitions[1:]
+            
+            file_path_display_line = f"\n`{rel_path_str}`:{module_docstring_line_str}"
+
+            if is_test_file:
+                file_path_display_line += " # (Test file, further details omitted)"
+                current_file_map_lines_for_this_file.append(file_path_display_line)
+                # No further processing of definitions or imports for test files
+            else:
+                # If it's NOT a test file, and there's no module docstring AND no other definitions, skip it.
+                if not module_docstring_line_str and not definitions_to_process_further:
+                    continue 
+
+                current_file_map_lines_for_this_file.append(file_path_display_line)
 
                 # Sort remaining top-level items (functions, classes) by line number
-                definitions.sort(key=lambda x: x[2])
+                definitions_to_process_further.sort(key=lambda x: x[2])
 
-                for definition in definitions:
+                for definition in definitions_to_process_further:
                     kind = definition[0]
                     name = definition[1]
                     # Function: (kind, name, lineno, args_str, docstring_first_line)
@@ -461,13 +474,13 @@ class RepoMap:
                         docstring_first_line = definition[4]
                         if docstring_first_line:
                             docstring_display_str = f" # {docstring_first_line}"
-                        file_map_lines.append(f"  - def {name}({args_str}){docstring_display_str}")
+                        current_file_map_lines_for_this_file.append(f"  - def {name}({args_str}){docstring_display_str}")
                     elif kind == "Class":
                         class_docstring_first_line = definition[3]
                         methods = definition[4] # List of method tuples
                         if class_docstring_first_line:
                             docstring_display_str = f" # {class_docstring_first_line}"
-                        file_map_lines.append(f"  - class {name}{docstring_display_str}")
+                        current_file_map_lines_for_this_file.append(f"  - class {name}{docstring_display_str}")
                         
                         # Methods list contains: ("Method", name, lineno, args_str, docstring_first_line)
                         for method_tuple in methods:
@@ -478,11 +491,11 @@ class RepoMap:
                             method_doc_str = ""
                             if method_docstring_first_line:
                                 method_doc_str = f" # {method_docstring_first_line}"
-                            file_map_lines.append(
+                            current_file_map_lines_for_this_file.append(
                                 f"    - def {method_name}({method_args_str}){method_doc_str}"
                             )
 
-                # --- Add Local Import Information ---
+                # --- Add Local Import Information for non-test files ---
                 local_imports = []
                 try:
                     # Pass self.root as the project_root for relative path calculation
@@ -495,12 +508,14 @@ class RepoMap:
                     )
 
                 if local_imports:
-                    file_map_lines.append("  - Imports:")
+                    current_file_map_lines_for_this_file.append("  - Imports:")
                     for imp_statement in local_imports:
-                        file_map_lines.append(f"    - {imp_statement}")
+                        current_file_map_lines_for_this_file.append(f"    - {imp_statement}")
                 # --- End Local Import Information ---
-
-                map_sections["Python Files"].extend(file_map_lines)
+            
+            # If any lines were generated for this file, add them to the main map section
+            if current_file_map_lines_for_this_file:
+                map_sections["Python Files"].extend(current_file_map_lines_for_this_file)
                 processed_py_files += 1
 
         # --- HTML Files Processing Removed ---
