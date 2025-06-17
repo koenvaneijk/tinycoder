@@ -324,15 +324,20 @@ class DockerManager:
             return True
 
     def build_service(self, service_name: str, non_interactive=False) -> bool:
-        """Builds a specific docker-compose service."""
-        self.logger.info(f"Building service '{service_name}'...")
-        # Add --no-cache for now to ensure fresh builds, can be made configurable later
-        success, stdout, stderr = self._run_command(['docker', 'compose', 'build', '--no-cache', service_name])
+        """Builds a specific docker-compose service, utilizing Docker's build cache."""
+        self.logger.info(f"Building service '{service_name}' (using cache)...")
+        # Removed --no-cache to allow Docker to use its build cache.
+        # Docker's cache invalidation (e.g., for changed COPYed files) will trigger rebuilds as needed.
+        success, stdout, stderr = self._run_command(['docker', 'compose', 'build', service_name])
         if not success:
             self.logger.error(f"Failed to build service '{service_name}':\n{stderr}")
+            if stdout: # Build errors can sometimes appear in stdout
+                self.logger.error(f"Stdout:\n{stdout}")
             return False
         else:
             self.logger.info(f"Service '{service_name}' built successfully.")
+            if stdout: # Log stdout for 'build' as well, can be informative
+                self.logger.debug(f"Output from 'docker compose build':\n{stdout}")
             return True
 
     def get_ps(self) -> Optional[str]:
