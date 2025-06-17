@@ -301,6 +301,28 @@ class DockerManager:
         else:
             self.logger.info(f"Service '{service_name}' restarted successfully.")
 
+    def up_service_recreate(self, service_name: str) -> bool:
+        """
+        Brings up a service, forcing recreation of its containers, using the latest image.
+        Assumes the image has already been built if necessary.
+        """
+        self.logger.info(f"Recreating service '{service_name}' with the latest image...")
+        # --no-build: Assumes build was handled separately
+        # --force-recreate: Ensures old container is replaced
+        # -d: Detached mode
+        command = ['docker', 'compose', 'up', '-d', '--force-recreate', '--no-build', service_name]
+        success, stdout, stderr = self._run_command(command)
+        if not success:
+            self.logger.error(f"Failed to recreate service '{service_name}':\n{stderr}")
+            if stdout: # Sometimes error details are in stdout for 'up'
+                self.logger.error(f"Stdout:\n{stdout}")
+            return False
+        else:
+            self.logger.info(f"Service '{service_name}' recreated and started successfully.")
+            if stdout: # Log stdout for 'up' even on success as it can be informative
+                self.logger.debug(f"Output from 'docker compose up':\n{stdout}")
+            return True
+
     def build_service(self, service_name: str, non_interactive=False) -> bool:
         """Builds a specific docker-compose service."""
         self.logger.info(f"Building service '{service_name}'...")

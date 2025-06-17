@@ -474,8 +474,9 @@ class App:
                     confirm = input(f"Rebuild and restart affected services ({', '.join(sorted_build_services)}) now? (y/N): ").strip().lower()
                     if confirm == 'y':
                         for service in sorted_build_services:
-                            if self.docker_manager.build_service(service): 
-                                self.docker_manager.restart_service(service) 
+                            if self.docker_manager.build_service(service):
+                                # Replace restart_service with up_service_recreate
+                                self.docker_manager.up_service_recreate(service)
                             # else: build failed, build_service logged it.
                 except (EOFError, KeyboardInterrupt):
                     self.logger.info("\nBuild & restart cancelled by user.")
