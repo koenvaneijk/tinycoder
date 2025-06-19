@@ -2,6 +2,7 @@ import logging
 from pathlib import Path
 from typing import Optional, Set, Callable
 
+from tinycoder.notebook_converter import ipynb_to_py, py_to_ipynb
 from tinycoder.ui.console_interface import ring_bell
 
 class FileManager:
@@ -126,31 +127,70 @@ class FileManager:
         return self.fnames
 
     def read_file(self, abs_path: Path) -> Optional[str]:
-        """Reads the content of a file given its absolute path."""
-        try:
-            return abs_path.read_text(encoding="utf-8", errors="replace")
-        except Exception as e:
-            self.logger.error(f"Error reading file {abs_path}: {e}")
-            return None
+        """
+        Reads the content of a file. For .ipynb files, it converts them to a
+        Python script representation.
+        """
+        if abs_path.suffix.lower() == ".ipynb":
+            self.logger.debug(f"Reading '{abs_path}' as Jupyter Notebook.")
+            try:
+                notebook_json_content = abs_path.read_text(
+                    encoding="utf-8", errors="replace"
+                )
+                return ipynb_to_py(notebook_json_content)
+            except Exception as e:
+                self.logger.error(f"Error reading or converting notebook {abs_path}: {e}")
+                return None
+        else:
+            try:
+                return abs_path.read_text(encoding="utf-8", errors="replace")
+            except Exception as e:
+                self.logger.error(f"Error reading file {abs_path}: {e}")
+                return None
 
     def write_file(self, abs_path: Path, content: str) -> bool:
-        """Writes content to a file given its absolute path. Handles line endings."""
+        """
+        Writes content to a file. For .ipynb files, it converts the Python script
+        representation back to the notebook JSON format.
+        """
         try:
-            # Check original line endings if file exists
-            original_content = ""
-            if abs_path.exists():
-                try:
-                    # Read bytes to detect line endings reliably
-                    with open(abs_path, "rb") as f:
-                        original_bytes = f.read()
-                    if b"\r\n" in original_bytes:
-                        content = content.replace("\n", "\r\n")
-                except Exception:
-                    # Fallback if reading bytes fails, use normalized content
-                    pass  # content remains with \n
-
             abs_path.parent.mkdir(parents=True, exist_ok=True)
-            abs_path.write_text(content, encoding="utf-8")
+
+            if abs_path.suffix.lower() == ".ipynb":
+                self.logger.debug(f"Writing to '{abs_path}' as Jupyter Notebook.")
+                # Read original to preserve metadata. py_to_ipynb handles non-existent files.
+                original_notebook_content = ""
+                if abs_path.exists():
+                    try:
+                        original_notebook_content = abs_path.read_text(
+                            encoding="utf-8", errors="replace"
+                        )
+                    except Exception as e:
+                        self.logger.warning(
+                            f"Could not read original notebook {abs_path} to preserve metadata: {e}"
+                        )
+
+                final_json_content = py_to_ipynb(content, original_notebook_content)
+                # py_to_ipynb produces a JSON string with '\n'. No special handling needed.
+                abs_path.write_text(final_json_content, encoding="utf-8")
+
+            else:
+                # Original logic for other files, slightly improved
+                final_content = content
+                if abs_path.exists():
+                    try:
+                        # Read a chunk of bytes to detect line endings reliably
+                        with open(abs_path, "rb") as f:
+                            original_bytes = f.read(4096)
+                        if b"\r\n" in original_bytes:
+                            # Assuming content is normalized to '\n', convert to '\r\n'
+                            final_content = content.replace("\n", "\r\n")
+                    except Exception:
+                        # Fallback if reading bytes fails, use normalized content
+                        pass  # content remains with \n
+
+                abs_path.write_text(final_content, encoding="utf-8")
+
             return True
         except Exception as e:
             self.logger.error(f"Error writing file {abs_path}: {e}")
