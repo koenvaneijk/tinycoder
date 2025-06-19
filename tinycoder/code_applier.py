@@ -286,7 +286,10 @@ class CodeApplier:
             error_string: Optional[str] = None
             file_suffix = abs_path.suffix.lower()
 
-            if file_suffix == ".py":
+            file_suffix = abs_path.suffix.lower()
+
+            if file_suffix == ".py" or file_suffix == ".ipynb":
+                # For .ipynb, we lint its Python representation, which is what we have.
                 error_string = self.python_linter.lint(abs_path, content_to_lint)
             elif file_suffix in [".html", ".htm"]:
                 error_string = self.html_linter.lint(abs_path, content_to_lint)
