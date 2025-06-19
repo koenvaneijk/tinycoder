@@ -20,6 +20,7 @@ TinyCoder is a Python-based tool designed to help you interact with Large Langua
 ## 🚀 Key Features
 
 *   **💻 Command-Line Interface:** Smooth terminal interaction with multiline input and potential path autocompletion.
+*   **📓 Jupyter Notebook Support:** Read, edit, and write `.ipynb` files. Notebooks are automatically converted to a plain Python representation for the LLM and converted back to `.ipynb` format upon saving.
 *   **🧠 Intelligent Context Building:**
     *   **File Management:** Easily add/remove files (`/add`, `/drop`, `/files`).
     *   **Automatic File Identification:** Suggests relevant files to add to the context based on your request (`/ask` for files feature).
