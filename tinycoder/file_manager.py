@@ -1,4 +1,5 @@
 import logging
+import sqlite3
 from pathlib import Path
 from typing import Optional, Set, Callable
 
@@ -196,6 +197,55 @@ class FileManager:
             self.logger.error(f"Error writing file {abs_path}: {e}")
             return False
 
+    def _read_db_summary(self, db_path: Path) -> str:
+        """Reads a SQLite DB and returns a summary of schema and sample data."""
+        summary_lines = [f"# Summary for SQLite database: {db_path.name}"]
+        try:
+            # Connect in read-only mode to prevent locking or accidental writes
+            db_uri = f'file:{db_path}?mode=ro'
+            conn = sqlite3.connect(db_uri, uri=True)
+            cursor = conn.cursor()
+
+            # Get all user table names
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';")
+            tables = [row[0] for row in cursor.fetchall()]
+
+            if not tables:
+                conn.close()
+                return f"# Database '{db_path.name}' contains no user tables."
+
+            for table_name in tables:
+                # Get the CREATE TABLE statement (schema)
+                summary_lines.append(f"\n# Schema for table: {table_name}")
+                cursor.execute(f"SELECT sql FROM sqlite_master WHERE type='table' AND name='{table_name}';")
+                schema = cursor.fetchone()[0]
+                summary_lines.append(schema)
+
+                # Get column names for a header
+                cursor.execute(f'PRAGMA table_info("{table_name}")')
+                columns = [info[1] for info in cursor.fetchall()]
+
+                # Get the first 3 rows of data
+                summary_lines.append(f"\n# First 3 rows from table: {table_name}")
+                summary_lines.append("# " + " | ".join(columns)) # Header
+                
+                cursor.execute(f'SELECT * FROM "{table_name}" LIMIT 3;')
+                for row in cursor.fetchall():
+                    str_row = [str(val) if val is not None else "NULL" for val in row]
+                    summary_lines.append("# " + " | ".join(str_row))
+            
+            conn.close()
+        
+        except sqlite3.DatabaseError as e:
+            # Handle cases where the file isn't a valid DB or is encrypted
+            self.logger.warning(f"Could not read SQLite DB summary for {db_path.name}: {e}")
+            return f"# Could not read SQLite DB summary for '{db_path.name}': {e}"
+        except Exception as e:
+            self.logger.error(f"An unexpected error occurred reading DB {db_path.name}: {e}")
+            return f"# An unexpected error occurred reading DB '{db_path.name}': {e}"
+
+        return "\n".join(summary_lines)
+
     def create_file(self, abs_path: Path) -> bool:
         """Creates an empty file if it doesn't exist."""
         try:
@@ -228,6 +278,13 @@ class FileManager:
             file_prefix = f"{fname}\n```\n"  # Use simple backticks for LLM
             file_suffix = "\n```\n"
             if abs_path and abs_path.exists() and abs_path.is_file():
+                # Handle SQLite databases by providing a schema and data summary
+                if abs_path.suffix.lower() in ['.db', '.sqlite', '.sqlite3']:
+                    self.logger.debug(f"File '{fname}' is a database, providing summary.")
+                    summary_content = self._read_db_summary(abs_path)
+                    all_content.append(file_prefix + summary_content + file_suffix)
+                    continue # Skip to the next file
+                
                 try:
                     # Read a small chunk first to check for binary content
                     with open(abs_path, "rb") as f_bin:
