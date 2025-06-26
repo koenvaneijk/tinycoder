@@ -23,6 +23,7 @@ class CommandHandler:
         file_manager: "FileManager",
         git_manager: "GitManager",
         docker_manager: Optional["DockerManager"],
+        logger: logging.Logger,
         clear_history_func: Callable[[], None],
         write_history_func: Callable[[str, str], None],
         get_mode: Callable[[], str],
@@ -47,6 +48,7 @@ class CommandHandler:
             file_manager: An instance of FileManager.
             git_manager: An instance of GitManager.
             docker_manager: An instance of DockerManager, or None.
+            logger: The application's configured logger instance.
             clear_history_func: Function to clear chat history.
             write_history_func: Function to write to chat history.
             get_mode: Function to get current mode.
@@ -67,6 +69,7 @@ class CommandHandler:
         self.file_manager = file_manager
         self.git_manager = git_manager
         self.docker_manager = docker_manager
+        self.logger = logger
         self.clear_history_func = clear_history_func
         self.write_history_func = write_history_func
         self.get_mode = get_mode
@@ -83,7 +86,6 @@ class CommandHandler:
         self.add_repomap_exclusion = add_repomap_exclusion_func
         self.remove_repomap_exclusion = remove_repomap_exclusion_func
         self.get_repomap_exclusions = get_repomap_exclusions_func
-        self.logger = logging.getLogger(__name__)
 
     # _run_tests method removed
 
@@ -349,6 +351,17 @@ class CommandHandler:
                         self.logger.info(f"- {fname_rel} (File not found or not yet created)")
             return True, None
 
+        elif command == "/showdb":
+            if not args_str:
+                self.logger.error("Usage: /showdb <database_file_path>")
+                return True, None
+            
+            summary = self.file_manager.get_db_summary(args_str)
+            if summary:
+                self.logger.info(f"\n--- SQLite DB Summary for {args_str} ---\n{summary}\n----------------------------------")
+            # If summary is None, get_db_summary already logged the specific error.
+            return True, None
+
         elif command == "/rules":
             rule_parts = args_str.split(maxsplit=1)
             sub_command = rule_parts[0] if rule_parts else "list" # Default to list
@@ -458,6 +471,7 @@ class CommandHandler:
   /add <file1> ["file 2"]...  Add file(s) to the chat context.
   /drop <file1> ["file 2"]... Remove file(s) from the chat context.
   /files                      List files currently in the chat.
+  /showdb <db_file>           Show the schema and sample data for a SQLite DB file.
   /suggest_files [instruction] Ask the LLM to suggest relevant files. Uses last user message if no instruction.
   /clear                      Clear the chat history.
   /reset                      Clear chat history and drop all files.

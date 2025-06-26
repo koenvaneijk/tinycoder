@@ -246,6 +246,24 @@ class FileManager:
 
         return "\n".join(summary_lines)
 
+    def get_db_summary(self, db_path_str: str) -> Optional[str]:
+        """
+        Public method to get a summary for a given database file path.
+        Returns the summary string or None if the file is invalid.
+        """
+        abs_path = self.get_abs_path(db_path_str)
+        if not abs_path or not abs_path.exists():
+            # get_abs_path logs an error if path is invalid/out of scope
+            # We add one here in case it's valid but doesn't exist
+            if not (abs_path and abs_path.exists()):
+                 self.logger.error(f"Database file not found: {db_path_str}")
+            return None
+        if abs_path.suffix.lower() not in ['.db', '.sqlite', '.sqlite3']:
+            self.logger.error(f"File is not a recognized SQLite database: {db_path_str}")
+            return None
+        
+        return self._read_db_summary(abs_path)
+
     def create_file(self, abs_path: Path) -> bool:
         """Creates an empty file if it doesn't exist."""
         try:
