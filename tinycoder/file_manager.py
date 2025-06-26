@@ -130,8 +130,12 @@ class FileManager:
     def read_file(self, abs_path: Path) -> Optional[str]:
         """
         Reads the content of a file. For .ipynb files, it converts them to a
-        Python script representation.
+        Python script representation. For database files, it generates a summary.
         """
+        if abs_path.suffix.lower() in ['.db', '.sqlite', '.sqlite3']:
+            self.logger.debug(f"Reading '{abs_path}' as SQLite database summary.")
+            return self._read_db_summary(abs_path)
+        
         if abs_path.suffix.lower() == ".ipynb":
             self.logger.debug(f"Reading '{abs_path}' as Jupyter Notebook.")
             try:
@@ -296,41 +300,34 @@ class FileManager:
             file_prefix = f"{fname}\n```\n"  # Use simple backticks for LLM
             file_suffix = "\n```\n"
             if abs_path and abs_path.exists() and abs_path.is_file():
-                # Handle SQLite databases by providing a schema and data summary
-                if abs_path.suffix.lower() in ['.db', '.sqlite', '.sqlite3']:
-                    self.logger.debug(f"File '{fname}' is a database, providing summary.")
-                    summary_content = self._read_db_summary(abs_path)
-                    all_content.append(file_prefix + summary_content + file_suffix)
-                    continue # Skip to the next file
+                # The read_file method now handles special file types (db, ipynb).
+                # This simplifies the logic here significantly.
                 
-                try:
-                    # Read a small chunk first to check for binary content
-                    with open(abs_path, "rb") as f_bin:
-                        chunk = f_bin.read(1024)
-                    if b"\0" in chunk:
-                        self.logger.warning(
-                            f"File {fname} appears to be binary, omitting content for LLM."
-                        )
-                        all_content.append(
-                            file_prefix + "(Binary file content omitted)" + file_suffix
-                        )
-                        continue  # Skip to the next file
-
-                    # If not binary-like, read as text
-                    content = self.read_file(
-                        abs_path
-                    )  # read_file handles potential UnicodeDecodeError
-                    if content is not None:
-                        all_content.append(file_prefix + content + file_suffix)
-                    else:
-                        # Error message already logged by read_file
-                        error_msg = f"(Error reading file, check logs)"
-                        all_content.append(file_prefix + error_msg + file_suffix)
-                except Exception as e:
-                    # Catch potential errors during the binary check read itself
-                    self.logger.error(
-                        f"Error checking file {fname} for binary content: {e}"
-                    )
+                # For non-special files, do a binary check first to avoid reading huge files into memory.
+                is_special_type = abs_path.suffix.lower() in ['.db', '.sqlite', '.sqlite3', '.ipynb']
+                if not is_special_type:
+                    try:
+                        with open(abs_path, "rb") as f_bin:
+                            chunk = f_bin.read(1024)
+                        if b"\0" in chunk:
+                            self.logger.warning(
+                                f"File {fname} appears to be a generic binary file, omitting content for LLM."
+                            )
+                            all_content.append(
+                                file_prefix + "(Binary file content omitted)" + file_suffix
+                            )
+                            continue  # Skip to the next file
+                    except Exception as e:
+                        self.logger.error(f"Error during binary check for {fname}: {e}")
+                        all_content.append(file_prefix + "(Error reading file)" + file_suffix)
+                        continue
+                
+                # If we passed the binary check or it's a special type, read it.
+                content = self.read_file(abs_path)
+                if content is not None:
+                    all_content.append(file_prefix + content + file_suffix)
+                else:
+                    # Error message already logged by read_file
                     error_msg = f"(Error reading file, check logs)"
                     all_content.append(file_prefix + error_msg + file_suffix)
 
