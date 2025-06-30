@@ -1,7 +1,7 @@
 import platform
 import sys
 import logging # For type hinting Logger
-from typing import Callable, Optional
+from typing import Callable, Optional, Dict
 
 from tinycoder.ui.log_formatter import STYLES, COLORS as FmtColors, RESET # Assuming this path
 
