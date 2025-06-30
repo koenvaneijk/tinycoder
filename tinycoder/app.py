@@ -24,6 +24,7 @@ from tinycoder.git_manager import GitManager
 from tinycoder.file_manager import FileManager
 from tinycoder.llms.base import LLMClient
 from tinycoder.llms import create_llm_client
+from tinycoder.llms.pricing import get_model_pricing
 from tinycoder.prompt_builder import PromptBuilder
 from tinycoder.repo_map import RepoMap
 from tinycoder.rule_manager import RuleManager
@@ -240,12 +241,13 @@ class App:
     def _init_app_state(self) -> None:
         """Initializes basic application state variables."""
         self.coder_commits: Set[str] = set()
-        self.coder_commits: Set[str] = set()
         self.mode = "code" # Default mode
         self.lint_errors_found: Dict[str, str] = {}
         self.reflected_message: Optional[str] = None
         self.include_repo_map: bool = True # Default to including the repo map
-        self.logger.debug("Basic app state initialized (commits, mode, lint status, repo map toggle).")
+        self.total_input_tokens: int = 0
+        self.total_output_tokens: int = 0
+        self.logger.debug("Basic app state initialized (commits, mode, lint status, repo map toggle, usage tracking).")
 
     def toggle_repo_map(self, state: bool) -> None:
         """Sets the state for including the repo map in prompts."""
@@ -747,9 +749,11 @@ class App:
                     "System prompt not found at the beginning of messages for LLM."
                 )
 
-            total_tokens = (sum(len(msg["content"]) for msg in history_to_send) + len(system_prompt_text))/4
+            input_chars = sum(len(msg["content"]) for msg in history_to_send) + len(system_prompt_text)
+            input_tokens = round(input_chars / 4)
+            self.total_input_tokens += input_tokens
             
-            self.logger.debug(f"Approx. total tokens to send: {total_tokens}") # Changed to debug for less noise
+            self.logger.debug(f"Approx. input tokens to send: {input_tokens}")
 
             self.spinner.start()
             try:
@@ -779,8 +783,10 @@ class App:
                 else:
                     self.logger.info(f"\n{FmtColors['CYAN']}{STYLES['BOLD']}ASSISTANT{RESET}:\n" + response_content + "\n")
                 
-                n_tokens = len(response_content)/4 # Based on raw response
-                self.logger.debug("Approx. response tokens: %d", n_tokens) # Changed to debug
+                output_chars = len(response_content)
+                output_tokens = round(output_chars / 4) # Based on raw response
+                self.total_output_tokens += output_tokens
+                self.logger.debug("Approx. response tokens: %d", output_tokens)
             
                 return response_content
 
@@ -981,6 +987,33 @@ class App:
             return True
 
         return False
+
+    def _display_usage_summary(self):
+        """Calculates and displays the token usage and estimated cost for the session."""
+        if self.total_input_tokens == 0 and self.total_output_tokens == 0:
+            return  # Don't display anything if no API calls were made
+
+        pricing = get_model_pricing(self.model)
+        
+        cost_str = ""
+        if pricing:
+            input_cost = (self.total_input_tokens / 1_000_000) * pricing["input"]
+            output_cost = (self.total_output_tokens / 1_000_000) * pricing["output"]
+            total_cost = input_cost + output_cost
+            cost_str = f" | Estimated Cost: ${total_cost:.4f}"
+        elif self.model:
+            cost_str = f" (cost data unavailable for model: {self.model})"
+            
+        summary_message = (
+            f"\n--- Session Summary ---\n"
+            f"Model: {self.model}\n"
+            f"Total Tokens: {self.total_input_tokens + self.total_output_tokens:,}"
+            f" (Input: {self.total_input_tokens:,}, Output: {self.total_output_tokens:,})"
+            f"{cost_str}\n"
+            f"-----------------------"
+        )
+        # Use print() to ensure the summary is always visible regardless of log level
+        print(summary_message)
 
     def process_user_input(self, non_interactive: bool = False):
         """Processes the latest user input (already in history), sends to LLM, handles response."""
@@ -1415,4 +1448,5 @@ class App:
                 print("\nExiting (EOF).", file=sys.stderr)
                 break  # Exit on Ctrl+D
 
+        self._display_usage_summary()
         self.logger.info("Goodbye! 👋")
