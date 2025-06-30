@@ -232,7 +232,8 @@ class App:
         self.console_interface = ConsoleInterface(
             logger=self.logger,
             get_app_mode_func=lambda: self.mode, # Pass a callable to get current mode
-            readline_available=READLINE_AVAILABLE # Pass the app-level constant
+            readline_available=READLINE_AVAILABLE, # Pass the app-level constant
+            get_token_count_func=self._get_current_context_token_count # Pass token counting function
         )
         self.logger.debug("ConsoleInterface initialized.")
 
@@ -633,6 +634,31 @@ class App:
             self.logger.debug(f"Readline history saved to {self.history_file}")
         except Exception as e:
             self.logger.error(f"Failed to save readline history to {self.history_file}: {e}")
+
+    def _get_current_context_token_count(self) -> int:
+        """Calculates the approximate token count for the current context."""
+        # 1. System Prompt
+        # This includes the repo map if it's enabled.
+        active_rules = self.rule_manager.get_active_rules_content()
+        system_prompt_content = self.prompt_builder.build_system_prompt(
+            self.mode,
+            active_rules,
+            self.include_repo_map
+        )
+        system_prompt_len = len(system_prompt_content)
+
+        # 2. File Context
+        file_context_message = self.prompt_builder.get_file_content_message()
+        file_context_len = len(file_context_message['content']) if file_context_message else 0
+
+        # 3. History
+        current_history = self.history_manager.get_history()
+        history_len = sum(len(msg['content']) for msg in current_history)
+
+        total_chars = system_prompt_len + file_context_len + history_len
+        
+        # Using the simple estimation: 1 token ~= 4 characters
+        return int(total_chars / 4)
 
     def _send_to_llm(self) -> Optional[str]:
         """Sends the current chat history and file context to the LLM."""

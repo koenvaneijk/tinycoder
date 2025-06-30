@@ -12,7 +12,7 @@ def ring_bell():
 class ConsoleInterface:
     """Handles console input operations for the application."""
 
-    def __init__(self, logger: logging.Logger, get_app_mode_func: Callable[[], str], readline_available: bool):
+    def __init__(self, logger: logging.Logger, get_app_mode_func: Callable[[], str], readline_available: bool, get_token_count_func: Callable[[], int]):
         """
         Initializes the ConsoleInterface.
 
@@ -20,10 +20,12 @@ class ConsoleInterface:
             logger: The application logger.
             get_app_mode_func: A callable that returns the current app mode (e.g., "code", "ask").
             readline_available: Boolean flag indicating if the readline module is available.
+            get_token_count_func: A callable that returns the current context token count.
         """
         self.logger = logger
         self.get_app_mode = get_app_mode_func
         self.readline_available = readline_available
+        self.get_token_count = get_token_count_func
 
     def _get_multiline_input_readline(self) -> Optional[str]:
         """
@@ -38,7 +40,19 @@ class ConsoleInterface:
         else:
             finish_instruction = "(Ctrl+D to finish)" # Standard Unix-like
 
-        print(f"Enter text {finish_instruction}:")
+        # Get token count for the prompt
+        token_count = self.get_token_count()
+        
+        # Color for token count based on size
+        token_color = FmtColors['GREEN']
+        if token_count > 15000: # Typical context window size thresholds
+            token_color = FmtColors['YELLOW']
+        if token_count > 25000:
+            token_color = FmtColors['RED']
+
+        # Construct the informational line
+        token_info = f"{token_color}[~{token_count:,} tokens]{RESET}"
+        print(f"Enter text {finish_instruction} {token_info}:")
 
         # Mode prefix for the prompt
         current_mode = self.get_app_mode()
@@ -72,13 +86,24 @@ class ConsoleInterface:
          """Gets multi-line input by reading stdin until EOF (fallback)."""
          # Determine the correct instruction based on the OS
          if platform.system() == "Windows":
-             message = "Enter text (Ctrl+Z then Enter to finish):"
+             finish_instruction = "Ctrl+Z then Enter to finish"
          else:
-             message = "Enter text (Ctrl+D to finish):"
+             finish_instruction = "Ctrl+D to finish"
 
-         print(message)
-         # Mode prefix for the prompt - print once before stdin.read()
+         # Get token count and mode for the prompt
+         token_count = self.get_token_count()
          current_mode = self.get_app_mode()
+         
+         token_color = FmtColors['GREEN']
+         if token_count > 15000:
+             token_color = FmtColors['YELLOW']
+         if token_count > 25000:
+             token_color = FmtColors['RED']
+         
+         token_info = f"{token_color}[~{token_count:,} tokens]{RESET}"
+         print(f"Enter text ({finish_instruction}) {token_info}:")
+
+         # Mode prefix for the prompt - print once before stdin.read()
          mode_prefix = f"{STYLES['BOLD']}{FmtColors['GREEN']}({current_mode}){RESET} "
          print(f"{mode_prefix}> ", end="", flush=True)
          try:
@@ -97,8 +122,18 @@ class ConsoleInterface:
     def _get_single_line_input_with_prompt(self) -> Optional[str]:
         """Gets single-line input using the built-in input(), with a formatted prompt."""
         current_mode = self.get_app_mode()
-        mode_prefix = f"{STYLES['BOLD']}{FmtColors['GREEN']}({current_mode}){RESET} "
-        prompt_str = f"{mode_prefix}> "
+        token_count = self.get_token_count()
+
+        token_color = FmtColors['GREEN']
+        if token_count > 15000:
+            token_color = FmtColors['YELLOW']
+        if token_count > 25000:
+            token_color = FmtColors['RED']
+
+        token_info = f"{STYLES['BOLD']}{token_color}[~{token_count:,} tokens]{RESET}"
+        mode_prefix = f"{STYLES['BOLD']}{FmtColors['GREEN']}({current_mode}){RESET}"
+
+        prompt_str = f"{mode_prefix} {token_info} > "
         try:
             line = input(prompt_str)
             return line
