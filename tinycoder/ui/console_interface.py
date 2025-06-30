@@ -12,7 +12,7 @@ def ring_bell():
 class ConsoleInterface:
     """Handles console input operations for the application."""
 
-    def __init__(self, logger: logging.Logger, get_app_mode_func: Callable[[], str], readline_available: bool, get_token_count_func: Callable[[], int]):
+    def __init__(self, logger: logging.Logger, get_app_mode_func: Callable[[], str], readline_available: bool, get_token_breakdown_func: Callable[[], Dict[str, int]]):
         """
         Initializes the ConsoleInterface.
 
@@ -20,12 +20,41 @@ class ConsoleInterface:
             logger: The application logger.
             get_app_mode_func: A callable that returns the current app mode (e.g., "code", "ask").
             readline_available: Boolean flag indicating if the readline module is available.
-            get_token_count_func: A callable that returns the current context token count.
+            get_token_breakdown_func: A callable that returns the context token breakdown.
         """
         self.logger = logger
         self.get_app_mode = get_app_mode_func
         self.readline_available = readline_available
-        self.get_token_count = get_token_count_func
+        self.get_token_breakdown = get_token_breakdown_func
+
+    def _format_token_breakdown(self, breakdown: Dict[str, int]) -> str:
+        """Formats the token breakdown dictionary into a user-friendly string."""
+        total = breakdown.get("total", 0)
+        prompt_rules = breakdown.get("prompt_rules", 0)
+        repo_map = breakdown.get("repo_map", 0)
+        files = breakdown.get("files", 0)
+        history = breakdown.get("history", 0)
+
+        # Color for total token count
+        total_color = FmtColors['GREEN']
+        if total > 15000:
+            total_color = FmtColors['YELLOW']
+        if total > 25000:
+            total_color = FmtColors['RED']
+        
+        total_str = f"Context: {total_color}{total:,}{RESET} tokens"
+
+        # Breakdown string, using grey for less emphasis
+        breakdown_parts = [
+            f"Prompt/Rules: {prompt_rules:,}",
+            f"Repo Map: {repo_map:,}",
+            f"Files: {files:,}",
+            f"History: {history:,}"
+        ]
+        breakdown_str = f"{FmtColors['GREY']}({', '.join(breakdown_parts)}){RESET}"
+
+        # Combine with tabs for alignment
+        return f"\t{total_str}\t{breakdown_str}"
 
     def _get_multiline_input_readline(self) -> Optional[str]:
         """
@@ -40,19 +69,12 @@ class ConsoleInterface:
         else:
             finish_instruction = "(Ctrl+D to finish)" # Standard Unix-like
 
-        # Get token count for the prompt
-        token_count = self.get_token_count()
-        
-        # Color for token count based on size
-        token_color = FmtColors['GREEN']
-        if token_count > 15000: # Typical context window size thresholds
-            token_color = FmtColors['YELLOW']
-        if token_count > 25000:
-            token_color = FmtColors['RED']
+        # Get and format token breakdown for the prompt
+        token_breakdown = self.get_token_breakdown()
+        token_info_line = self._format_token_breakdown(token_breakdown)
 
         # Construct the informational line
-        token_info = f"{token_color}[~{token_count:,} tokens]{RESET}"
-        print(f"Enter text {finish_instruction} {token_info}:")
+        print(f"Enter text {finish_instruction}{token_info_line}")
 
         # Mode prefix for the prompt
         current_mode = self.get_app_mode()
@@ -90,20 +112,14 @@ class ConsoleInterface:
          else:
              finish_instruction = "Ctrl+D to finish"
 
-         # Get token count and mode for the prompt
-         token_count = self.get_token_count()
-         current_mode = self.get_app_mode()
-         
-         token_color = FmtColors['GREEN']
-         if token_count > 15000:
-             token_color = FmtColors['YELLOW']
-         if token_count > 25000:
-             token_color = FmtColors['RED']
-         
-         token_info = f"{token_color}[~{token_count:,} tokens]{RESET}"
-         print(f"Enter text ({finish_instruction}) {token_info}:")
+         # Get and format token breakdown for the prompt
+         token_breakdown = self.get_token_breakdown()
+         token_info_line = self._format_token_breakdown(token_breakdown)
+
+         print(f"Enter text ({finish_instruction}){token_info_line}")
 
          # Mode prefix for the prompt - print once before stdin.read()
+         current_mode = self.get_app_mode()
          mode_prefix = f"{STYLES['BOLD']}{FmtColors['GREEN']}({current_mode}){RESET} "
          print(f"{mode_prefix}> ", end="", flush=True)
          try:
@@ -122,7 +138,8 @@ class ConsoleInterface:
     def _get_single_line_input_with_prompt(self) -> Optional[str]:
         """Gets single-line input using the built-in input(), with a formatted prompt."""
         current_mode = self.get_app_mode()
-        token_count = self.get_token_count()
+        token_breakdown = self.get_token_breakdown()
+        token_count = token_breakdown.get('total', 0)
 
         token_color = FmtColors['GREEN']
         if token_count > 15000:
@@ -130,7 +147,8 @@ class ConsoleInterface:
         if token_count > 25000:
             token_color = FmtColors['RED']
 
-        token_info = f"{STYLES['BOLD']}{token_color}[~{token_count:,} tokens]{RESET}"
+        # Simplified info for a more compact single-line prompt
+        token_info = f"{token_color}[Context: {token_count:,} tokens]{RESET}"
         mode_prefix = f"{STYLES['BOLD']}{FmtColors['GREEN']}({current_mode}){RESET}"
 
         prompt_str = f"{mode_prefix} {token_info} > "

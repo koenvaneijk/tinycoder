@@ -233,7 +233,7 @@ class App:
             logger=self.logger,
             get_app_mode_func=lambda: self.mode, # Pass a callable to get current mode
             readline_available=READLINE_AVAILABLE, # Pass the app-level constant
-            get_token_count_func=self._get_current_context_token_count # Pass token counting function
+            get_token_breakdown_func=self._get_current_context_token_breakdown # Pass token breakdown function
         )
         self.logger.debug("ConsoleInterface initialized.")
 
@@ -635,30 +635,49 @@ class App:
         except Exception as e:
             self.logger.error(f"Failed to save readline history to {self.history_file}: {e}")
 
-    def _get_current_context_token_count(self) -> int:
-        """Calculates the approximate token count for the current context."""
-        # 1. System Prompt
-        # This includes the repo map if it's enabled.
+    def _get_current_context_token_breakdown(self) -> Dict[str, int]:
+        """Calculates the approximate token count breakdown for the current context."""
+        # This is a helper function to estimate tokens from characters.
+        def count_tokens(text: str) -> int:
+            return int(len(text) / 4)
+
+        # 1. System Prompt (Base + Rules)
         active_rules = self.rule_manager.get_active_rules_content()
-        system_prompt_content = self.prompt_builder.build_system_prompt(
+        # Build system prompt WITHOUT repo map to isolate its size
+        base_system_prompt_content = self.prompt_builder.build_system_prompt(
             self.mode,
             active_rules,
-            self.include_repo_map
+            include_map=False # Exclude map for this part of calculation
         )
-        system_prompt_len = len(system_prompt_content)
+        system_prompt_tokens = count_tokens(base_system_prompt_content)
 
-        # 2. File Context
+        # 2. Repo Map
+        repo_map_tokens = 0
+        if self.include_repo_map:
+            # Generate the repo map separately to get its size
+            chat_files_rel = self.file_manager.get_files()
+            repo_map_str = self.repo_map.generate_map(chat_files_rel)
+            repo_map_tokens = count_tokens(repo_map_str)
+
+        # 3. File Context
         file_context_message = self.prompt_builder.get_file_content_message()
-        file_context_len = len(file_context_message['content']) if file_context_message else 0
+        file_context_content = file_context_message['content'] if file_context_message else ""
+        file_context_tokens = count_tokens(file_context_content)
 
-        # 3. History
+        # 4. History
         current_history = self.history_manager.get_history()
-        history_len = sum(len(msg['content']) for msg in current_history)
+        history_content = "\n".join(msg['content'] for msg in current_history)
+        history_tokens = count_tokens(history_content)
 
-        total_chars = system_prompt_len + file_context_len + history_len
-        
-        # Using the simple estimation: 1 token ~= 4 characters
-        return int(total_chars / 4)
+        total_tokens = system_prompt_tokens + repo_map_tokens + file_context_tokens + history_tokens
+
+        return {
+            "total": total_tokens,
+            "prompt_rules": system_prompt_tokens,
+            "repo_map": repo_map_tokens,
+            "files": file_context_tokens,
+            "history": history_tokens,
+        }
 
     def _send_to_llm(self) -> Optional[str]:
         """Sends the current chat history and file context to the LLM."""
@@ -1306,7 +1325,6 @@ class App:
         
         # Constructing the welcome message parts
         model_line = f"  Model: {FmtColors['GREEN']}{STYLES['BOLD']}{self.model}{RESET}"
-        repo_map_line = f"  Repo Map: {repo_map_status_output_str}"
 
         # Active Rules status
         num_active_rules = len(self.rule_manager.last_loaded_rule_names)
@@ -1346,7 +1364,6 @@ class App:
 
         # Log each part on a new line for clarity
         self.logger.info(model_line)
-        self.logger.info(repo_map_line)
         self.logger.info(docker_line) # Added Docker status line
         self.logger.info(active_rules_line)
         self.logger.info(help_line)
