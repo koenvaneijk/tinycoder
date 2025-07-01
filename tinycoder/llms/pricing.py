@@ -24,6 +24,7 @@ PRICING_DATA: Dict[str, List[Dict[str, Any]]] = {
     {
       "provider_name": "Google",
       "models": [
+        { "model_id": "gemini-2.5-pro", "input_price_per_million_tokens": 1.25, "output_price_per_million_tokens": 10.00 },
         { "model_id": "gemini-1.5-pro-latest", "input_price_per_million_tokens": 3.50, "output_price_per_million_tokens": 10.50 },
         { "model_id": "gemini-1.5-flash-latest", "input_price_per_million_tokens": 0.35, "output_price_per_million_tokens": 1.05 }
       ]

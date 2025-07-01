@@ -994,23 +994,56 @@ class App:
             return  # Don't display anything if no API calls were made
 
         pricing = get_model_pricing(self.model)
+        total_tokens = self.total_input_tokens + self.total_output_tokens
         
-        cost_str = ""
+        cost_line = ""
         if pricing:
             input_cost = (self.total_input_tokens / 1_000_000) * pricing["input"]
             output_cost = (self.total_output_tokens / 1_000_000) * pricing["output"]
             total_cost = input_cost + output_cost
-            cost_str = f" | Estimated Cost: ${total_cost:.4f}"
+            cost_line = f"Est. Cost:  {STYLES['BOLD']}{FmtColors['YELLOW']}${total_cost:.4f}{RESET}"
         elif self.model:
-            cost_str = f" (cost data unavailable for model: {self.model})"
+            cost_line = f"Est. Cost:  {FmtColors['GREY']}(price data unavailable for {self.model}){RESET}"
             
+        # Prepare formatted lines
+        title_line = f"{STYLES['BOLD']}Session Summary{RESET}"
+        model_line = f"Model:      {STYLES['BOLD']}{FmtColors['GREEN']}{self.model}{RESET}"
+        tokens_line = (
+            f"Tokens:     {STYLES['BOLD']}{FmtColors['CYAN']}{total_tokens:,}{RESET} "
+            f"{FmtColors['GREY']}(Input: {self.total_input_tokens:,} | Output: {self.total_output_tokens:,}){RESET}"
+        )
+
+        def get_visual_length(s: str) -> int:
+            """Calculates the visible length of a string by removing ANSI escape codes."""
+            return len(re.sub(r'\x1b\[[0-9;]*m', '', s))
+
+        # Build the final output string with a box
+        border_char = '─'
+        width = 60 # Fixed width for simplicity and clean alignment
+
+        def pad_line(line: str) -> str:
+            """Pads a line to the fixed width, accounting for ANSI codes."""
+            visual_len = get_visual_length(line)
+            padding = ' ' * (width - visual_len)
+            return f"{line}{padding}"
+        
+        def center_line(line: str) -> str:
+            """Centers a line within the fixed width, accounting for ANSI codes."""
+            visual_len = get_visual_length(line)
+            padding_total = width - visual_len
+            if padding_total < 0: padding_total = 0
+            left_pad = ' ' * (padding_total // 2)
+            right_pad = ' ' * (padding_total - len(left_pad))
+            return f"{left_pad}{line}{right_pad}"
+
         summary_message = (
-            f"\n--- Session Summary ---\n"
-            f"Model: {self.model}\n"
-            f"Total Tokens: {self.total_input_tokens + self.total_output_tokens:,}"
-            f" (Input: {self.total_input_tokens:,}, Output: {self.total_output_tokens:,})"
-            f"{cost_str}\n"
-            f"-----------------------"
+            f"\n{FmtColors['GREY']}┌{border_char * (width + 2)}┐{RESET}\n"
+            f"{FmtColors['GREY']}│ {center_line(title_line)} {FmtColors['GREY']}│{RESET}\n"
+            f"{FmtColors['GREY']}├{border_char * (width + 2)}┤{RESET}\n"
+            f"{FmtColors['GREY']}│ {pad_line(model_line)} {FmtColors['GREY']}│{RESET}\n"
+            f"{FmtColors['GREY']}│ {pad_line(tokens_line)} {FmtColors['GREY']}│{RESET}\n"
+            f"{FmtColors['GREY']}│ {pad_line(cost_line)} {FmtColors['GREY']}│{RESET}\n"
+            f"{FmtColors['GREY']}└{border_char * (width + 2)}┘{RESET}"
         )
         # Use print() to ensure the summary is always visible regardless of log level
         print(summary_message)
