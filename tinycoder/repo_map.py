@@ -559,6 +559,4 @@ class RepoMap:
         if total_lines >= MAX_MAP_LINES:
             final_map_lines.append("\n... (repository map truncated)")
 
-        self.logger.info("Repo map: " + str(len("\n".join(final_map_lines)) / 4) + " tokens")
-
         return "\n".join(final_map_lines)
