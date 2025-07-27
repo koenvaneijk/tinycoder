@@ -90,7 +90,8 @@ class InputPreprocessor:
         modified_inp = inp # Start with original, append snippets later
         
         # 1. @entity mentions
-        entity_mentions = re.findall(r'@([a-zA-Z_]\w*)', original_inp)
+        # Use a negative lookbehind to ensure the @ is not preceded by a word character (e.g. in an email)
+        entity_mentions = re.findall(r'(?<![a-zA-Z0-9_])@([a-zA-Z_]\w*)', original_inp)
         
         extracted_snippets_text = []
 
