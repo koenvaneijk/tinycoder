@@ -111,49 +111,50 @@ class CommandHandler:
                 return True, None
 
             base_path = self.file_manager.root if self.file_manager.root else Path.cwd()
-            
+
             for p_or_l_arg in patterns_or_literals:
-                # Attempt to glob using the argument
-                matched_abs_paths = list(base_path.glob(p_or_l_arg))
-                
-                files_added_by_glob = 0
-                if matched_abs_paths: # Glob pattern yielded some results
-                    self.logger.info(f"Pattern '{p_or_l_arg}' matched {len(matched_abs_paths)} item(s).")
-                    for abs_path_match in matched_abs_paths:
-                        if abs_path_match.is_file():
-                            # Pass the absolute path string to file_manager
-                            if self.file_manager.add_file(str(abs_path_match)): # add_file handles its own logging
-                                files_added_by_glob += 1
-                                # For history, get the relative path
-                                rel_path = self.file_manager._get_rel_path(abs_path_match)
-                                self.write_history_func("tool", f"Added {rel_path} to the chat (file matched by glob '{p_or_l_arg}').")
-                        elif abs_path_match.is_dir():
-                            rel_path_dir = self.file_manager._get_rel_path(abs_path_match)
-                            self.logger.info(f"Pattern '{p_or_l_arg}' matched directory '{rel_path_dir}'. Recursively adding files from it.")
-                            for sub_file_path in abs_path_match.rglob('*'): # rglob for recursive
-                                if sub_file_path.is_file():
-                                    if self.file_manager.add_file(str(sub_file_path)):
-                                        files_added_by_glob += 1
-                                        rel_sub_file_path = self.file_manager._get_rel_path(sub_file_path)
-                                        self.write_history_func("tool", f"Added {rel_sub_file_path} (from dir '{rel_path_dir}' matched by '{p_or_l_arg}').")
-                        # Other types (symlinks to files, etc.) will be handled by add_file's validation
-                
-                # Fallback to literal if:
-                # 1. Glob pattern yielded no results (matched_abs_paths is empty)
-                # OR
-                # 2. Glob pattern yielded results, but none of them were files that got successfully added.
-                if not matched_abs_paths or files_added_by_glob == 0:
-                    if not matched_abs_paths: 
-                        self.logger.debug(f"Pattern '{p_or_l_arg}' matched no items. Treating as a literal file name.")
-                    # else: # Glob matched something (e.g. dir), but no files were added from it. We can still try it as a literal.
-                    #    self.logger.debug(f"Glob pattern '{p_or_l_arg}' matched items, but no files were added from it. Trying as literal.")
-                    
-                    if self.file_manager.add_file(p_or_l_arg): # add_file handles its own logging
-                        # For history, need to resolve the literal path to its relative form
+                # Determine if the argument is a pattern or an explicit file path
+                is_pattern = any(c in p_or_l_arg for c in ['*', '?', '[', ']'])
+
+                if not is_pattern:
+                    # This is an explicit file path, bypass exclusions by using force=True
+                    self.logger.debug(f"Treating '{p_or_l_arg}' as an explicit path, bypassing exclusions.")
+                    if self.file_manager.add_file(p_or_l_arg, force=True):
                         abs_path_literal = self.file_manager.get_abs_path(p_or_l_arg)
-                        if abs_path_literal: # Should be true if add_file succeeded
+                        if abs_path_literal:
                             rel_path = self.file_manager._get_rel_path(abs_path_literal)
-                            self.write_history_func("tool", f"Added {rel_path} to the chat (literal path).")
+                            self.write_history_func("tool", f"Added {rel_path} to the chat.")
+                else:
+                    # This is a pattern, apply exclusions by using force=False (the default)
+                    self.logger.debug(f"Treating '{p_or_l_arg}' as a pattern, applying exclusions.")
+                    matched_paths = list(base_path.glob(p_or_l_arg))
+
+                    if not matched_paths:
+                        self.logger.warning(f"Pattern '{p_or_l_arg}' did not match any files or directories.")
+                        continue
+
+                    files_added_from_pattern = 0
+                    for path in matched_paths:
+                        if path.is_file():
+                            if self.file_manager.add_file(str(path)):
+                                files_added_from_pattern += 1
+                                rel_path = self.file_manager._get_rel_path(path)
+                                self.write_history_func("tool", f"Added {rel_path} (matched by '{p_or_l_arg}').")
+                        elif path.is_dir():
+                            rel_path_dir = self.file_manager._get_rel_path(path)
+                            self.logger.info(f"Recursively adding from directory '{rel_path_dir}' matched by pattern.")
+                            for sub_file in path.rglob('*'):
+                                if sub_file.is_file():
+                                    if self.file_manager.add_file(str(sub_file)):
+                                        files_added_from_pattern += 1
+                                        rel_sub_path = self.file_manager._get_rel_path(sub_file)
+                                        self.write_history_func("tool", f"Added {rel_sub_path} (from dir '{rel_path_dir}' matched by '{p_or_l_arg}').")
+                    
+                    if files_added_from_pattern > 0:
+                         self.logger.info(f"Added {files_added_from_pattern} file(s) from pattern '{p_or_l_arg}'.")
+                    else:
+                        self.logger.info(f"Pattern '{p_or_l_arg}' matched items, but no new files were added (they may be excluded or already in context).")
+
             return True, None
 
         elif command == "/drop":

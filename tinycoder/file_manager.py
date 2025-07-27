@@ -6,6 +6,26 @@ from typing import Optional, Set, Callable
 from tinycoder.notebook_converter import ipynb_to_py, py_to_ipynb
 from tinycoder.ui.console_interface import ring_bell
 
+# A set of common directory names to exclude from being added to the context.
+DEFAULT_EXCLUDED_DIRS = {
+    ".git",
+    "node_modules",
+    "venv",
+    ".venv",
+    "__pycache__",
+    ".pytest_cache",
+    "build",
+    "dist",
+    ".egg-info",
+    ".mypy_cache",
+    ".vscode",
+    ".idea",
+}
+
+# Heuristic for detecting binary files by checking the first N bytes.
+BINARY_CHECK_BYTES = 1024
+
+
 class FileManager:
     """Manages the set of files in the chat context and file operations."""
 
@@ -61,41 +81,70 @@ class FileManager:
         except ValueError:
             # Should not happen if get_abs_path validation is correct, but handle defensively
             return str(abs_path)
+            
+    def _is_path_excluded_by_dir(self, abs_path: Path) -> bool:
+        """Checks if a path is within one of the commonly excluded directories."""
+        base_path = self.root if self.root else Path.cwd()
+        try:
+            rel_path = abs_path.relative_to(base_path)
+        except ValueError:
+            return True # Path is outside the project root, exclude.
+        return any(part in DEFAULT_EXCLUDED_DIRS for part in rel_path.parts)
 
-    def add_file(self, fname: str) -> bool:
+    def _is_binary_file(self, abs_path: Path) -> bool:
+        """Heuristically checks if a file is binary by looking for null bytes."""
+        if abs_path.suffix.lower() in ['.db', '.sqlite', '.sqlite3', '.ipynb']:
+            return False
+        try:
+            with open(abs_path, "rb") as f:
+                chunk = f.read(BINARY_CHECK_BYTES)
+            return b"\0" in chunk
+        except Exception:
+            self.logger.warning(f"Could not perform binary check on {abs_path}, skipping.")
+            return True
+
+    def add_file(self, fname: str, force: bool = False) -> bool:
         """
-        Adds a file to the chat context by its relative or absolute path.
-        Returns True if the file was successfully added or already existed, False otherwise.
+        Adds a file to the chat context. With force=False (default), it excludes
+        common directories and binary files. With force=True, it bypasses these checks.
+        Returns True if the file was successfully added, False otherwise.
         """
         abs_path = self.get_abs_path(fname)
         if not abs_path:
-            return False  # Error printed by get_abs_path
+            return False
 
         rel_path = self._get_rel_path(abs_path)
 
-        # Check if file exists before adding
+        # === Exclusion Checks (only run if force=False) ===
+        if not force:
+            if self._is_path_excluded_by_dir(abs_path):
+                self.logger.info(f"Skipping file in excluded directory: {rel_path}")
+                return False
+            # The binary check requires file I/O, so check if it exists first
+            if abs_path.exists() and self._is_binary_file(abs_path):
+                self.logger.info(f"Skipping binary file: {rel_path}")
+                return False
+        # === End of Exclusion Checks ===
+
         if not abs_path.exists():
-            # Ask user if they want to create the file
             ring_bell()
             create = self.io_input(
                 f"FILE: '{rel_path}' does not exist. Create it? (y/N): "
             )
             if create.lower() == "y":
                 if not self.create_file(abs_path):
-                    return False  # Error logged by create_file
-                # File created successfully, proceed to add it to fnames
+                    return False
             else:
                 self.logger.info(f"File creation declined by user: {rel_path}")
-                return False  # User declined creation
+                return False
 
         if rel_path in self.fnames:
             self.logger.info(f"File {rel_path} is already in the chat context.")
-            return True  # Already added counts as success for the caller
+            return True
         else:
             self.fnames.add(rel_path)
             self.logger.info(f"Added {rel_path} to the chat context.")
-            # Note: History writing is handled by the caller (tinycoder)
-            return True  # Successfully added
+            return True
 
     def drop_file(self, fname: str) -> bool:
         """
