@@ -47,7 +47,7 @@ def main():
     # New provider selection argument
     parser.add_argument(
         "--provider",
-        choices=["anthropic", "gemini", "ollama", "together", "deepseek"],
+        choices=["anthropic", "gemini", "ollama", "together", "deepseek", "groq"],
         default=default_provider,
         help="The LLM provider to use (default: auto-detected or from TINYCODER_PROVIDER env var)",
     )
@@ -110,6 +110,9 @@ def main():
         elif args.provider == "together":
             model_name = args.model or "Qwen/Qwen3-235B-A22B-fp8-tput"
             model_str = f"together-{model_name}"
+        elif args.provider == "groq":
+            model_name = args.model or "llama3-8b-8192"
+            model_str = f"groq-{model_name}"
         elif args.provider == "ollama":
             model_str = args.model or "qwen3:14b"
     
