@@ -83,6 +83,7 @@ class CodeApplier:
         files_created_in_this_run: Set[str] = set() # Files treated as new creations in this batch
         lint_errors_found: Dict[str, str] = {}
         write_failed = False
+        creation_decision: Optional[str] = None # 'allow_all', 'skip_all'
 
         for i, (fname, search_block, replace_block) in enumerate(edits):
             edit_failed_this_iteration = False
@@ -102,10 +103,35 @@ class CodeApplier:
                 rel_path not in self.file_manager.get_files()
                 and rel_path not in touched_files # Check if touched earlier in *this specific batch*
             ):
-                confirm = self.input_func(
-                    f"LLM wants to edit '{COLORS['CYAN']}{rel_path}{RESET}' which is not in the chat. Allow? (y/N): "
-                )
-                if confirm.lower() == "y":
+                allow_edit = False
+                is_new_file = not abs_path.exists()
+
+                if is_new_file:
+                    if creation_decision == 'allow_all':
+                        allow_edit = True
+                    elif creation_decision == 'skip_all':
+                        allow_edit = False
+                        self.logger.warning(f"Skipping creation of {COLORS['CYAN']}{rel_path}{RESET} due to 'skip all' decision.")
+                    else:
+                        confirm = self.input_func(
+                            f"LLM wants to create new file '{COLORS['CYAN']}{rel_path}{RESET}'. Allow? (y/N/a[llow all]/s[kip all]): "
+                        ).lower()
+                        if confirm in ['y', 'yes', 'a', 'allow all']:
+                            allow_edit = True
+                            if confirm in ['a', 'allow all']:
+                                creation_decision = 'allow_all'
+                        else: # n, no, s, skip all, or anything else
+                            allow_edit = False
+                            if confirm in ['s', 'skip all']:
+                                creation_decision = 'skip_all'
+                else: # File exists, but is not in context
+                    confirm = self.input_func(
+                        f"LLM wants to edit '{COLORS['CYAN']}{rel_path}{RESET}' which is not in the chat. Allow? (y/N): "
+                    )
+                    if confirm.lower() == 'y':
+                        allow_edit = True
+
+                if allow_edit:
                     if not self.file_manager.add_file(fname): # Adds to FileManager's context
                         self.logger.error(f"Could not add '{COLORS['CYAN']}{fname}{RESET}' to context for editing.")
                         failed_edits_indices.append(i + 1)
@@ -114,7 +140,7 @@ class CodeApplier:
                     self.logger.error(f"Skipping edit for {COLORS['CYAN']}{fname}{RESET} as user declined.")
                     failed_edits_indices.append(i + 1)
                     continue
-            
+
             touched_files.add(rel_path)
 
             # Read and cache original disk content ONCE per file for this batch
