@@ -6,6 +6,7 @@ from .deepseek import DeepSeekClient
 from .ollama import OllamaClient, DEFAULT_OLLAMA_MODEL, DEFAULT_OLLAMA_HOST # Import OllamaClient and its defaults
 from .anthropic import AnthropicClient # Import AnthropicClient
 from .together_ai import TogetherAIClient, DEFAULT_TOGETHER_MODEL # Import TogetherAIClient
+from .groq import GroqClient # Import GroqClient
 
 from typing import Optional
 
@@ -18,6 +19,7 @@ __all__ = [
     "OllamaClient", # Add OllamaClient to __all__
     "AnthropicClient", # Add AnthropicClient to __all__
     "TogetherAIClient", # Add TogetherAIClient to __all__
+    "GroqClient", # Add GroqClient to __all__
 ]
 
 logger = logging.getLogger(__name__)
@@ -78,6 +80,15 @@ def create_llm_client(model: Optional[str]) -> LLMClient:
             resolved_model_name = client.model
         except Exception as e:
             raise ValueError(f"Error initializing Together.ai client for model '{model}': {e}") from e
+    elif model and model.startswith("groq-"):
+        logger.debug(f"Attempting to initialize Groq client with model: {model}")
+        try:
+            # Strip the "groq-" prefix for the actual model name
+            actual_model = model[len("groq-"):]
+            client = GroqClient(model=actual_model)
+            resolved_model_name = client.model
+        except Exception as e:
+            raise ValueError(f"Error initializing Groq client for model '{model}': {e}") from e
     else:
         # Assume Ollama for unknown/missing prefixes if not recognized
         logger.info(f"Unknown or missing prefix for model '{model}'. Assuming local Ollama model.")

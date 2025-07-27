@@ -34,7 +34,8 @@ PRICING_DATA: Dict[str, List[Dict[str, Any]]] = {
       "models": [
           { "model_id": "llama3-8b-8192", "input_price_per_million_tokens": 0.05, "output_price_per_million_tokens": 0.10 },
           { "model_id": "llama3-70b-8192", "input_price_per_million_tokens": 0.59, "output_price_per_million_tokens": 0.79 },
-          { "model_id": "mixtral-8x7b-32768", "input_price_per_million_tokens": 0.24, "output_price_per_million_tokens": 0.24 }
+          { "model_id": "mixtral-8x7b-32768", "input_price_per_million_tokens": 0.24, "output_price_per_million_tokens": 0.24 },
+          { "model_id": "moonshotai/kimi-k2-instruct", "input_price_per_million_tokens": 1.00, "output_price_per_million_tokens": 3.00 }
       ]
     },
     {
