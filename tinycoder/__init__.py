@@ -111,7 +111,7 @@ def main():
             model_name = args.model or "Qwen/Qwen3-235B-A22B-fp8-tput"
             model_str = f"together-{model_name}"
         elif args.provider == "groq":
-            model_name = args.model or "mixtral-8x7b-32768"
+            model_name = args.model or "moonshotai/kimi-k2-instruct"
             model_str = f"groq-{model_name}"
         elif args.provider == "ollama":
             model_str = args.model or "qwen3:14b"
