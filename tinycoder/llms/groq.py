@@ -46,6 +46,7 @@ class GroqClient(LLMClient):
         self.headers = {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
+            "User-Agent": "tinycoder/1.0",
         }
 
     def _format_history(self, system_prompt: str, history: List[Dict[str, str]]) -> List[Dict[str, Any]]:
