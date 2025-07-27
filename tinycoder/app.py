@@ -30,7 +30,7 @@ from tinycoder.repo_map import RepoMap
 from tinycoder.rule_manager import RuleManager
 from tinycoder.shell_executor import ShellExecutor
 from tinycoder.input_preprocessor import InputPreprocessor
-from tinycoder.ui.console_interface import ring_bell, ConsoleInterface
+from tinycoder.ui.console_interface import ring_bell, ConsoleInterface, prompt_user_input
 from tinycoder.ui.command_completer import CommandCompleter, READLINE_AVAILABLE as COMPLETION_READLINE_AVAILABLE
 from tinycoder.ui.log_formatter import ColorLogFormatter, STYLES, COLORS as FmtColors, RESET
 from tinycoder.ui.spinner import Spinner
@@ -137,12 +137,7 @@ class App:
             self.logger.warning(
                 f"Git is available, but no .git directory found starting from {Path.cwd()}."
             )
-            try:
-                print("Initialize a new Git repository here? (y/N): ", end="", flush=True)
-                response = input()
-            except EOFError: # Handle non-interactive scenarios
-                response = "n"
-                print() # Newline after simulated EOF
+            response = prompt_user_input("Initialize a new Git repository here? (y/N): ")
 
             if response.lower() == 'y':
                 initialized = self.git_manager.initialize_repo()
@@ -166,7 +161,7 @@ class App:
     def _init_core_managers(self, continue_chat: bool) -> None:
         """Initializes FileManager, ChatHistoryManager, and RepoMap."""
         # These depend on self.git_root potentially being set by _setup_git()
-        self.file_manager = FileManager(self.git_root, input)
+        self.file_manager = FileManager(self.git_root, prompt_user_input)
         self.history_manager = ChatHistoryManager(continue_chat=continue_chat)
         self.repo_map = RepoMap(self.git_root) # Pass the final git_root
         self.logger.debug("Core managers (File, History, RepoMap) initialized.")
@@ -297,13 +292,9 @@ class App:
             for i, fname in enumerate(suggested_files):
                 self.logger.info(f"  {i+1}. {fname}")
 
-            try:
-                confirm_prompt = "Add files to context? (y/N, or list indices like '1,3'): "
-                confirm = input(confirm_prompt).strip().lower()
-            except EOFError:
-                confirm = "n"
-                print() 
-            except KeyboardInterrupt:
+            confirm_prompt = "Add files to context? (y/N, or list indices like '1,3'): "
+            confirm = prompt_user_input(confirm_prompt).strip().lower()
+            if not confirm: # User cancelled
                 self.logger.info("\nFile addition cancelled by user.")
                 return
 
@@ -371,7 +362,7 @@ class App:
         self.code_applier = CodeApplier(
             file_manager=self.file_manager,
             git_manager=self.git_manager,
-            input_func=input, # Use built-in input for confirmations within applier
+            input_func=prompt_user_input, # Use centralized input for confirmations within applier
         )
         # Initialize ShellExecutor
         self.shell_executor = ShellExecutor(
@@ -474,16 +465,19 @@ class App:
             if non_interactive:
                 self.logger.info("Non-interactive mode: Skipping build & restart prompt. Please manage manually.")
             else:
-                try:
-                    confirm = input(f"Rebuild and restart affected services ({', '.join(sorted_build_services)}) now? (y/N): ").strip().lower()
-                    if confirm == 'y':
+                prompt = f"Rebuild and restart affected services ({', '.join(sorted_build_services)}) now? (y/N): "
+                confirm = prompt_user_input(prompt).strip().lower()
+
+                if not confirm:  # User cancelled the prompt
+                    self.logger.info("\nBuild & restart cancelled by user.")
+                elif confirm == 'y':
+                    try:
                         for service in sorted_build_services:
                             if self.docker_manager.build_service(service):
-                                # Replace restart_service with up_service_recreate
                                 self.docker_manager.up_service_recreate(service)
-                            # else: build failed, build_service logged it.
-                except (EOFError, KeyboardInterrupt):
-                    self.logger.info("\nBuild & restart cancelled by user.")
+                    except KeyboardInterrupt:
+                        self.logger.info("\nBuild & restart operation cancelled by user.")
+
             return # Exit after build consideration, regardless of user choice
 
         # Handle services that only needed a volume-based restart (and weren't built)
@@ -940,13 +934,10 @@ class App:
         for i, fname in enumerate(valid_files_to_potentially_add):
             self.logger.info(f"  {i+1}. {FmtColors['CYAN']}{fname}{RESET}")
         
-        try:
-            confirm_prompt = "Add these files to context? (y/N, or list indices like '1,3'): "
-            confirm = input(confirm_prompt).strip().lower()
-        except EOFError:
-            confirm = "n"
-            print() 
-        except KeyboardInterrupt:
+        confirm_prompt = "Add these files to context? (y/N, or list indices like '1,3'): "
+        confirm = prompt_user_input(confirm_prompt).strip().lower()
+
+        if not confirm: # Handles cancellation from prompt_user_input
             self.logger.info("\nFile addition (from LLM request) cancelled by user.")
             self.reflected_message = "User cancelled the addition of requested files. Please advise on how to proceed or if you can continue without them."
             return True
@@ -1109,8 +1100,7 @@ class App:
                     combined_errors = "\n".join(error_messages)
                     self.logger.error(combined_errors)
 
-                    ring_bell()
-                    fix_lint = input("Attempt to fix lint errors? (y/N): ")
+                    fix_lint = prompt_user_input("Attempt to fix lint errors? (y/N): ")
                     if fix_lint.lower() == "y":
                         self.reflected_message = combined_errors
             
