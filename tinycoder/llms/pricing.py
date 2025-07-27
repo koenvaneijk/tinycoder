@@ -41,6 +41,7 @@ PRICING_DATA: Dict[str, List[Dict[str, Any]]] = {
     {
         "provider_name": "Together",
         "models": [
+            { "model_id": "Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8", "input_price_per_million_tokens": 2.00, "output_price_per_million_tokens": 2.00 },
             { "model_id": "meta-llama/Llama-3-8B-chat-hf", "input_price_per_million_tokens": 0.10, "output_price_per_million_tokens": 0.10 },
             { "model_id": "meta-llama/Llama-3-70B-chat-hf", "input_price_per_million_tokens": 0.90, "output_price_per_million_tokens": 0.90 },
             { "model_id": "mistralai/Mixtral-8x7B-Instruct-v0.1", "input_price_per_million_tokens": 0.60, "output_price_per_million_tokens": 0.60 }

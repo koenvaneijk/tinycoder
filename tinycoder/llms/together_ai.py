@@ -7,7 +7,7 @@ import tinycoder.requests as requests
 from tinycoder.llms.base import LLMClient
 
 # Default model
-DEFAULT_TOGETHER_MODEL = "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
+DEFAULT_TOGETHER_MODEL = "Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8"
 TOGETHER_API_ENDPOINT = "https://api.together.xyz/v1/chat/completions"
 TOGETHER_API_KEY_ENV_VAR = "TOGETHER_API_KEY"
 
