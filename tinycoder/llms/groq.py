@@ -7,7 +7,7 @@ import tinycoder.requests as requests
 from tinycoder.llms.base import LLMClient
 
 # Default model on Groq
-DEFAULT_GROQ_MODEL = "llama3-8b-8192"
+DEFAULT_GROQ_MODEL = "moonshotai/kimi-k2-instruct"
 GROQ_API_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_API_KEY_ENV_VAR = "GROQ_API_KEY"
 
