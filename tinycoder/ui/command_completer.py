@@ -34,43 +34,86 @@ class CommandCompleter:
         self._refresh_file_options()
 
     def _refresh_file_options(self):
-        """Fetches the list of relative file paths from the FileManager."""
+        """Fetches the list of relative file paths from the filesystem."""
         try:
             base_path = self.file_manager.root if self.file_manager.root else Path.cwd()
             repo_files: Set[str] = set()
             self.logger.debug(f"Refreshing file options for completion based on: {base_path}")
 
-            if self.git_manager and self.git_manager.is_repo():
-                tracked_files = self.git_manager.get_tracked_files_relative()
-                repo_files.update(tracked_files)
-                self.logger.debug(f"Found {len(tracked_files)} tracked files via Git.")
-            else:
-                # Fallback: Walk the directory if not a git repo or git failed
-                self.logger.debug("Not a Git repo or Git unavailable, walking the directory...")
-                excluded_dirs = {'.git', '__pycache__', 'node_modules', '.venv', 'venv', '.tox', 'dist', 'build', 'eggs', '*.egg-info'}
+            # Always scan the filesystem for all available files
+            self.logger.debug("Scanning filesystem for all available files...")
+            excluded_dirs = {
+                '.git', '__pycache__', 'node_modules', '.venv', 'venv', 
+                '.tox', 'dist', 'build', 'eggs', '*.egg-info',
+                '.pytest_cache', '.mypy_cache', '.coverage', 'htmlcov',
+                '.tox', 'build', 'dist', '*.egg-info', 'migrations'
+            }
+            
+            # Get files from the repo map's get_py_files and get_html_files methods
+            try:
+                from tinycoder.repo_map import RepoMap
+                repo_map = RepoMap(str(base_path))
+                
+                # Add Python files
+                for py_file in repo_map.get_py_files():
+                    try:
+                        rel_path = py_file.relative_to(base_path)
+                        repo_files.add(str(rel_path).replace('\\', '/'))
+                    except ValueError:
+                        pass
+                
+                # Add HTML files
+                for html_file in repo_map.get_html_files():
+                    try:
+                        rel_path = html_file.relative_to(base_path)
+                        repo_files.add(str(rel_path).replace('\\', '/'))
+                    except ValueError:
+                        pass
+                
+                # Add other common file types
+                for ext in ['*.py', '*.html', '*.js', '*.css', '*.json', '*.yml', '*.yaml', 
+                           '*.md', '*.txt', '*.xml', '*.ini', '*.cfg', '*.toml']:
+                    try:
+                        for file_path in base_path.rglob(ext):
+                            # Check against excluded directories
+                            if any(excluded_dir in str(file_path).split('/') for excluded_dir in excluded_dirs):
+                                continue
+                            if file_path.is_file() and not file_path.name.startswith('.'):
+                                try:
+                                    rel_path = file_path.relative_to(base_path)
+                                    repo_files.add(str(rel_path).replace('\\', '/'))
+                                except ValueError:
+                                    pass
+                    except Exception:
+                        pass  # Ignore glob errors
+                        
+            except Exception:
+                # Fallback to simple directory walk if repo map fails
                 for item in base_path.rglob('*'):
-                    if any(excluded_dir in item.parts for excluded_dir in excluded_dirs):
+                    if any(excluded_dir in str(item).split('/') for excluded_dir in excluded_dirs):
                         continue
-                    if item.is_file():
+                    if item.is_file() and not item.name.startswith('.'):
                         try:
                             rel_path = item.relative_to(base_path)
                             repo_files.add(str(rel_path).replace('\\', '/'))
                         except ValueError:
                             self.logger.warning(f"Could not make path relative: {item}")
-                        except Exception as walk_err:
-                            self.logger.warning(f"Error processing path during walk: {item} - {walk_err}")
-                self.logger.debug(f"Found {len(repo_files)} files via directory walk.")
 
+            # Include git-tracked files for completeness
+            if self.git_manager and self.git_manager.is_repo():
+                tracked_files = self.git_manager.get_tracked_files_relative()
+                repo_files.update(tracked_files)
+
+            # Always include current context files
             context_files = self.file_manager.get_files()
             repo_files.update(context_files)
-            if context_files:
-                 self.logger.debug(f"Added {len(context_files)} files from current chat context.")
-
+            
             self.file_options = sorted(list(repo_files))
             self.logger.debug(f"Total unique file options for completion: {len(self.file_options)}")
 
         except Exception as e:
             self.logger.error(f"Error refreshing file options for completion: {e}", exc_info=True)
+            # Fallback to just context files
             self.file_options = sorted(list(self.file_manager.get_files()))
 
 
