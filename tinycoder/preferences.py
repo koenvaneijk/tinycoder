@@ -84,6 +84,8 @@ def load_user_preference_model() -> Optional[str]:
             return f"deepseek-{name}" 
         elif provider == "together":
             return f"together-{name}"
+        elif provider == "groq":
+            return f"groq-{name}"
         else:
             return name  # For ollama or other formats
             
@@ -102,7 +104,8 @@ def save_user_preference(provider_class: str, model_name: str) -> None:
         "GeminiClient": "gemini", 
         "TogetherAIClient": "together",
         "DeepSeekClient": "deepseek",
-        "OllamaClient": "ollama"
+        "OllamaClient": "ollama",
+        "GroqClient": "groq",
     }
     
     provider = provider_mapping.get(provider_class)
@@ -118,6 +121,8 @@ def save_user_preference(provider_class: str, model_name: str) -> None:
             name = name[9:]  # Remove "deepseek-" prefix
         elif provider == "together" and name.startswith("together-"):
             name = name[9:]  # Remove "together-" prefix
+        elif provider == "groq" and name.startswith("groq-"):
+            name = name[5:]  # Remove "groq-" prefix
             
         # Store in structured format for flexibility
         prefs["model"] = {
