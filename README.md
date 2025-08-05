@@ -6,6 +6,7 @@
   <img src="https://img.shields.io/badge/python-3.8+-blue.svg" alt="Python Version">
   <img src="https://img.shields.io/badge/license-AGPLv3-green.svg" alt="License">
   <img src="https://img.shields.io/github/last-commit/koenvaneijk/tinycoder" alt="Last Commit">
+  <a href="#-using-on-android-termux"><img src="https://img.shields.io/badge/Android-Termux-brightgreen" alt="Runs on Termux"></a>
 </p>
 
 <p align="center">
@@ -69,24 +70,27 @@ TinyCoder is a Python-based tool designed to help you interact with Large Langua
 
 **Requirements:** Python 3.8+
 
-**Option 1: Install directly from GitHub**
-
+**Recommended: Install from PyPI**
+The easiest way to install TinyCoder is from PyPI:
 ```bash
-python3 -m pip install git+https://github.com/koenvaneijk/tinycoder.git
+pip install tinycoder
 ```
 
-**Option 2: Clone and install locally**
+**Alternative: Install from GitHub (latest version)**
+To get the very latest changes, you can install directly from the repository:
+```bash
+pip install git+https://github.com/koenvaneijk/tinycoder.git
+```
 
+**For Development: Clone and Install Locally**
+If you want to contribute to TinyCoder, you can clone the repository and install it in editable mode:
 ```bash
 # 1. Clone the repository
 git clone https://github.com/koenvaneijk/tinycoder.git
 cd tinycoder
 
-# 2. Install (choose one)
-#    Editable mode (for development)
-python3 -m pip install -e .
-#    Standard install
-# python3 -m pip install .
+# 2. Install in editable mode
+pip install -e .
 ```
 
 **🔑 API Keys:**
@@ -99,6 +103,43 @@ python3 -m pip install -e .
     *   Groq: `GROQ_API_KEY`
 *   Ollama runs locally and does not require an API key.
 *   You can also set `OLLAMA_HOST` if your Ollama instance is not at the default `http://localhost:11434`.
+
+---
+
+### 📱 Using on Android (Termux)
+
+TinyCoder runs effectively on Android devices using the [Termux](https://termux.dev/en/) terminal emulator, allowing you to have a powerful AI coding assistant in your pocket.
+
+**1. Prerequisites**
+
+*   Install the **Termux** application from [F-Droid](https://f-droid.org/en/packages/com.termux/). The version on the Google Play Store is deprecated and will not work correctly.
+
+**2. Installation Steps in Termux**
+
+*   First, open Termux and ensure its packages are up-to-date:
+    ```bash
+    pkg update && pkg upgrade
+    ```
+*   Install the necessary dependencies, `python` and `git`:
+    ```bash
+    pkg install python git
+    ```
+*   Install `tinycoder` from PyPI:
+    ```bash
+    pip install tinycoder
+    ```
+
+**3. Configuration**
+
+*   You'll need to set your LLM API key as an environment variable. A common way to do this is to add it to your shell's startup file (e.g., `~/.bashrc`):
+    ```bash
+    # Replace with your actual key and provider variable
+    echo 'export GEMINI_API_KEY="YOUR_API_KEY_HERE"' >> ~/.bashrc
+    
+    # Reload the shell configuration
+    source ~/.bashrc
+    ```
+*   You can now use `tinycoder` as you would on a desktop system.
 
 ---
 
