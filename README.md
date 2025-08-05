@@ -189,9 +189,23 @@ Contributions are welcome! Please read the `CONTRIBUTING.md` file (if it exists)
 
 ---
 
+## 💼 Commercial Use & Professional Services
+
+While TinyCoder is provided under the AGPLv3+ license for open-source use, I understand that this may not be suitable for all business needs. I offer professional services and alternative licensing for commercial applications.
+
+Please feel free to contact me at **vaneijk.koen@gmail.com** for inquiries related to:
+
+*   **Commercial Licensing:** If you need to integrate TinyCoder into a proprietary product or require a license without the obligations of AGPLv3.
+*   **Paid Feature Development:** If you would like to sponsor the development of specific features or customizations tailored to your workflow.
+*   **Integration Support:** If you require expert assistance in embedding TinyCoder into your company's systems or development environment.
+
+I am happy to discuss how TinyCoder can best serve your business needs.
+
+---
+
 ## 📜 License
 
-This project is licensed under the AGPLv3+ License. If you need a different license, please contact me at vaneijk.koen@gmail.com.
+This project is licensed under the AGPLv3+ License.
 
 ---
 
