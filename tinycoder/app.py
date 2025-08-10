@@ -6,14 +6,12 @@ import sys
 import traceback
 from pathlib import Path
 from typing import List, Set, Dict, Optional
-import atexit
 
-# readline is not available on all platforms (e.g., standard Windows cmd)
-try:
-    import readline
-    READLINE_AVAILABLE = True
-except ImportError:
-    READLINE_AVAILABLE = False
+from prompt_toolkit import PromptSession, print_formatted_text
+from prompt_toolkit.completion import Completer
+from prompt_toolkit.formatted_text import FormattedText
+from prompt_toolkit.history import FileHistory
+from prompt_toolkit.styles import Style
 
 from tinycoder.chat_history import ChatHistoryManager
 from tinycoder.code_applier import CodeApplier
@@ -30,8 +28,8 @@ from tinycoder.repo_map import RepoMap
 from tinycoder.rule_manager import RuleManager
 from tinycoder.shell_executor import ShellExecutor
 from tinycoder.input_preprocessor import InputPreprocessor
-from tinycoder.ui.console_interface import ring_bell, ConsoleInterface, prompt_user_input
-from tinycoder.ui.command_completer import CommandCompleter, READLINE_AVAILABLE as COMPLETION_READLINE_AVAILABLE
+from tinycoder.ui.console_interface import ring_bell, prompt_user_input
+from tinycoder.ui.command_completer import PTKCommandCompleter
 from tinycoder.ui.log_formatter import ColorLogFormatter, STYLES, COLORS as FmtColors, RESET
 from tinycoder.ui.spinner import Spinner
 from tinycoder.docker_manager import DockerManager
@@ -54,10 +52,9 @@ class App:
         self._init_prompt_builder()
         self._setup_rules_manager()
         self._init_input_preprocessor() # Initialize InputPreprocessor
-        self._init_console_interface() # Initialize ConsoleInterface
+        self._init_prompt_session() # Initialize PromptSession and styles
         self._init_app_state()
         self._init_command_handler()
-        self._configure_readline()
         self._init_app_components()
         self._log_final_status()
         self._add_initial_files(files)
@@ -213,6 +210,47 @@ class App:
         )
         self.logger.debug("RuleManager initialized.")
 
+    def _init_prompt_session(self) -> None:
+        """Initializes the prompt_toolkit session, completer, and style."""
+        # Setup history file
+        hist_dir = Path.home() / ".local" / "share" / APP_NAME
+        hist_dir.mkdir(parents=True, exist_ok=True)
+        history_file = hist_dir / HISTORY_FILE
+
+        # Setup completer
+        self.completer: Optional[Completer] = PTKCommandCompleter(self.file_manager, self.git_manager)
+
+        self.prompt_session = PromptSession(
+            history=FileHistory(str(history_file)),
+            completer=self.completer,
+            multiline=True,
+            prompt_continuation="... "
+        )
+        self.logger.debug("Prompt session initialized with history and completer.")
+
+        # Central style for the application
+        self.style = Style.from_dict({
+            'prompt.mode': 'bold fg:ansigreen',
+            'prompt.separator': 'fg:ansibrightblack',
+            'rprompt.tokens.low': 'fg:ansigreen',
+            'rprompt.tokens.medium': 'fg:ansiyellow',
+            'rprompt.tokens.high': 'fg:ansired',
+            'rprompt.text': 'fg:ansibrightblack',
+            'assistant.header': 'bold fg:ansicyan',
+            'markdown.h1': 'bold fg:ansiblue',
+            'markdown.h2': 'bold fg:ansimagenta',
+            'markdown.h3': 'bold fg:ansicyan',
+            'markdown.bold': 'bold',
+            'markdown.code': 'fg:ansiyellow',
+            'markdown.code-block': 'fg:ansigreen',
+            'markdown.list': 'fg:ansicyan',
+            'diff.header': 'bold',
+            'diff.plus': 'fg:ansigreen',
+            'diff.minus': 'fg:ansired',
+        })
+        self.logger.debug("Application style defined.")
+
+
     def _init_input_preprocessor(self) -> None:
         """Initializes the InputPreprocessor."""
         self.input_preprocessor = InputPreprocessor(
@@ -222,16 +260,6 @@ class App:
             repo_map=self.repo_map
         )
         self.logger.debug("InputPreprocessor initialized.")
-
-    def _init_console_interface(self) -> None:
-        """Initializes the ConsoleInterface."""
-        self.console_interface = ConsoleInterface(
-            logger=self.logger,
-            get_app_mode_func=lambda: self.mode, # Pass a callable to get current mode
-            readline_available=READLINE_AVAILABLE, # Pass the app-level constant
-            get_token_breakdown_func=self._get_current_context_token_breakdown # Pass token breakdown function
-        )
-        self.logger.debug("ConsoleInterface initialized.")
 
     def _init_app_state(self) -> None:
         """Initializes basic application state variables."""
@@ -357,12 +385,13 @@ class App:
         self.logger.debug("CommandHandler initialized.")
 
     def _init_app_components(self) -> None:
-        """Initializes EditParser, CodeApplier, and determines input function."""
+        """Initializes EditParser, CodeApplier, and ShellExecutor."""
         self.edit_parser = EditParser()
         self.code_applier = CodeApplier(
             file_manager=self.file_manager,
             git_manager=self.git_manager,
-            input_func=prompt_user_input, # Use centralized input for confirmations within applier
+            input_func=prompt_user_input, # Use centralized input for confirmations
+            style=self.style, # Pass style for diff printing
         )
         # Initialize ShellExecutor
         self.shell_executor = ShellExecutor(
@@ -370,9 +399,7 @@ class App:
             history_manager=self.history_manager,
             git_root=self.git_root
         )
-        # Determine primary input function for main loop using ConsoleInterface
-        self.input_func = self.console_interface.determine_input_function()
-        self.logger.debug("App components (Parser, Applier, ShellExecutor, Input Func from ConsoleInterface) initialized.")
+        self.logger.debug("App components (Parser, Applier, ShellExecutor) initialized.")
 
     def _handle_docker_automation(self, modified_files_rel: List[str], non_interactive: bool = False):
         """
@@ -553,84 +580,6 @@ class App:
         else:
             return str(Path.cwd().resolve())
         
-    def _configure_readline(self):
-        """Configures readline for history and command completion if available."""
-        # Use the local READLINE_AVAILABLE for history, and the imported one for completer
-        if not READLINE_AVAILABLE: # This is the one defined in __init__.py for history
-            self.logger.info("Readline module not available for history features.")
-            # No return here yet, completion might still be attempted if COMPLETION_READLINE_AVAILABLE is true
-
-        if not COMPLETION_READLINE_AVAILABLE: # This is from command_completer.py
-            self.logger.info("Readline module not available for command completion features.")
-        
-        if not READLINE_AVAILABLE and not COMPLETION_READLINE_AVAILABLE:
-            self.logger.info("Readline module not available. Skipping history and completion setup.")
-            return
-
-        self.logger.debug("Readline available. Configuring...")
-
-        # --- Completion Setup ---
-        if COMPLETION_READLINE_AVAILABLE:
-            try:
-                completer_instance = CommandCompleter(self.file_manager, self.git_manager)
-                readline.set_completer(completer_instance.complete)
-
-                # Set delimiters for completion. Crucially, DO NOT include path separators like '/' or '.'
-                # if you want to complete segments containing them. Let's stick to whitespace and typical shell separators.
-                # Space is the most important delimiter here to separate `/add` from the path.
-                readline.set_completer_delims(' \t\n`~!@#$%^&*()=+[{]}|;:\'",<>?') # Removed \ . /
-
-                # Configure Tab key binding
-                if 'libedit' in readline.__doc__: # macOS/libedit
-                    readline.parse_and_bind("bind -e") # Ensure emacs mode
-                    readline.parse_and_bind("bind '\t' rl_complete")
-                    self.logger.debug("Using libedit Tab binding.")
-                else: # GNU readline
-                    readline.parse_and_bind("tab: complete")
-                    self.logger.debug("Using standard readline Tab binding.")
-
-            except Exception as e:
-                self.logger.error(f"Failed to configure readline completion: {e}", exc_info=True)
-
-
-        # --- History Setup ---
-        if READLINE_AVAILABLE: # Guard history setup with the local READLINE_AVAILABLE
-            # Use project identifier for potentially project-specific history
-            # Or use a generic one in the user's home directory
-            hist_dir = Path.home() / ".local" / "share" / APP_NAME
-            hist_dir.mkdir(parents=True, exist_ok=True) # Ensure directory exists
-            # Use a consistent history filename
-            self.history_file = hist_dir / HISTORY_FILE
-
-            try:
-                # Set history length (optional)
-                readline.set_history_length(1000)
-                # Read history file *after* setting bindings and completer, *before* registering save
-                if self.history_file.exists():
-                    readline.read_history_file(self.history_file)
-                    self.logger.debug(f"Read history from {self.history_file}")
-                else:
-                    self.logger.debug(f"History file {self.history_file} not found, starting fresh.")
-
-                # Register saving history on exit
-                atexit.register(self._save_readline_history)
-                self.logger.debug("Readline history configured and loaded.")
-            except Exception as e:
-                self.logger.error(f"Failed to configure readline history: {e}", exc_info=True)
-        else:
-            self.logger.debug("Skipping readline history setup as readline is not available.")
-
-
-    def _save_readline_history(self):
-        """Saves the readline history to the designated file."""
-        if not READLINE_AVAILABLE: # Use local READLINE_AVAILABLE
-            return
-        try:
-            readline.write_history_file(self.history_file)
-            self.logger.debug(f"Readline history saved to {self.history_file}")
-        except Exception as e:
-            self.logger.error(f"Failed to save readline history to {self.history_file}: {e}")
-
     def _get_current_context_token_breakdown(self) -> Dict[str, int]:
         """Calculates the approximate token count breakdown for the current context."""
         # This is a helper function to estimate tokens from characters.
@@ -770,13 +719,19 @@ class App:
                 )
                 return None
             else:
+                assistant_header = [('class:assistant.header', 'ASSISTANT'), ('', ':\n')]
+                print_formatted_text(FormattedText(assistant_header), style=self.style)
+
                 # Format for display if in ask mode and not an edit block
                 if self.mode == "ask" and response_content and not response_content.strip().startswith("<"):
-                    display_response = self._format_markdown_for_terminal(response_content)
-                    self.logger.info(f"\n{FmtColors['CYAN']}{STYLES['BOLD']}ASSISTANT{RESET}:\n" + display_response + "\n")
+                    display_response_tuples = self._format_markdown_for_terminal(response_content)
+                    print_formatted_text(FormattedText(display_response_tuples), style=self.style)
                 else:
-                    self.logger.info(f"\n{FmtColors['CYAN']}{STYLES['BOLD']}ASSISTANT{RESET}:\n" + response_content + "\n")
+                    # Print raw content, but use prompt_toolkit to handle potential long lines
+                    print_formatted_text(response_content)
                 
+                print() # Add a final newline for spacing
+
                 output_chars = len(response_content)
                 output_tokens = round(output_chars / 4) # Based on raw response
                 self.total_output_tokens += output_tokens
@@ -1170,72 +1125,36 @@ class App:
         self.lint_errors_found = {}
         self.reflected_message = None
 
-    def _format_markdown_for_terminal(self, markdown_text: str) -> str:
-        """Applies simple ANSI styling to markdown text for terminal readability."""
-        processed_lines = []
+    def _format_markdown_for_terminal(self, markdown_text: str) -> List[Tuple[str, str]]:
+        """Converts markdown text to a list of (style_class, text) tuples for prompt_toolkit."""
+        formatted_text = []
         in_code_block = False
-        # Code block language is not used yet, but could be for syntax highlighting in future
-        # code_block_lang = "" 
 
         for line in markdown_text.splitlines():
-            stripped_line = line.lstrip() # Use lstrip for checking prefixes, keep original indent for code blocks
+            stripped_line = line.lstrip()
 
-            # Handle Fenced Code Blocks
             if stripped_line.startswith("```"):
-                if in_code_block:
-                    in_code_block = False
-                    # Color the fence itself
-                    processed_lines.append(FmtColors['GREY'] + line + RESET)
-                else:
-                    in_code_block = True
-                    # code_block_lang = stripped_line[3:].strip()
-                    # lang_display = f" ({code_block_lang})" if code_block_lang else ""
-                    processed_lines.append(FmtColors['GREY'] + line + RESET)
+                in_code_block = not in_code_block
+                formatted_text.append(('class:markdown.code-block', line + '\n'))
                 continue
 
             if in_code_block:
-                # Preserve original line including leading spaces for indentation
-                processed_lines.append(FmtColors['GREEN'] + line + RESET)
+                formatted_text.append(('class:markdown.code-block', line + '\n'))
                 continue
 
-            # Handle Headers (e.g., # H1, ## H2)
             if stripped_line.startswith("#"):
-                level = 0
-                temp_line = stripped_line
-                while temp_line.startswith('#'):
-                    level += 1
-                    temp_line = temp_line[1:]
-                
-                if temp_line.startswith(' '): # Make sure it's a header, not just a line starting with #
-                    header_text = temp_line[1:]
-                    original_indent = line[:-len(stripped_line)] # Get leading whitespace
-                    if level == 1: # H1
-                        line = f"{original_indent}{STYLES['BOLD']}{FmtColors['BLUE']}# {header_text}{RESET}"
-                    elif level == 2: # H2
-                        line = f"{original_indent}{STYLES['BOLD']}{FmtColors['MAGENTA']}## {header_text}{RESET}"
-                    else: # H3+
-                        line = f"{original_indent}{STYLES['BOLD']}{FmtColors['CYAN']}{'#' * level} {header_text}{RESET}"
-            else:
-                # Handle Bold (**text** or __text__)
-                # Apply bold and then immediately reset. The reset also turns off previous colors if any.
-                # If we want to keep surrounding colors, this would need to be more complex.
-                # Using a non-greedy match (.*?)
-                line = re.sub(r'\*\*(.*?)\*\*', rf'{STYLES["BOLD"]}\1{RESET}', line)
-                line = re.sub(r'__(.*?)__', rf'{STYLES["BOLD"]}\1{RESET}', line) # STYLES.NORMAL might be needed if terminal holds bold
-
-                # Handle Inline Code (`code`) - apply after bold to allow `**bold code**`
-                # (though typical markdown `**`code`**` would be `code` bolded)
-                # For simplicity, this colors the content of `...`
-                line = re.sub(r'`(.*?)`', rf'{FmtColors["YELLOW"]}\1{RESET}', line)
-                
-                # Handle Lists (* item, - item, 1. item)
-                # Simple coloring of the marker. Preserves leading whitespace.
-                line = re.sub(r'^(\s*)(\* |\- |\+ )', rf'\1{FmtColors["CYAN"]}\2{RESET}', line, 1)
-                line = re.sub(r'^(\s*)([0-9]+\. )', rf'\1{FmtColors["CYAN"]}\2{RESET}', line, 1)
+                level = len(stripped_line) - len(stripped_line.lstrip('#'))
+                if stripped_line[level:].startswith(' '):
+                    style_class = f'class:markdown.h{min(level, 3)}'
+                    formatted_text.append((style_class, line + '\n'))
+                    continue
             
-            processed_lines.append(line)
+            # This part is a simplification. A real markdown parser would be needed for complex cases.
+            # For now, we just append the line. Further regex for bold/italic could be added here.
+            formatted_text.append(('', line + '\n'))
 
-        return "\n".join(processed_lines)
+        return formatted_text
+
 
     def _handle_command(self, user_message: str) -> bool:
         """
@@ -1356,120 +1275,60 @@ class App:
         return True  # Indicate normal processing occurred (or finished reflection loop)
 
     def run(self):
-        """Main loop for the chat application."""
-        # Determine repo map status string with more detail
-        repo_map_status_output_str: str
-        if self.include_repo_map:
-            user_exclusions = self.repo_map.get_user_exclusions()
-            if user_exclusions:
-                num_exclusions = len(user_exclusions)
-                exclusions_details = f"with {num_exclusions} exclusion"
-                if num_exclusions > 1:
-                    exclusions_details += "s"
-                # Using YELLOW for enabled with exclusions
-                repo_map_status_output_str = f"{FmtColors['YELLOW']}{STYLES['BOLD']}Enabled ({exclusions_details}){RESET}"
-            else:
-                # Using GREEN for standard enabled (no exclusions)
-                repo_map_status_output_str = f"{FmtColors['GREEN']}{STYLES['BOLD']}Enabled{RESET}"
-        else:
-            # Using default terminal color (bolded) for disabled
-            repo_map_status_output_str = f"{STYLES['BOLD']}Disabled{RESET}"
-        
-        # Use FmtColors and STYLES for the welcome message
-        # Apply specific color (GREEN) before BOLD, then RESET immediately after.
-        # The rest of the message will use the default INFO format (terminal default color).
-        
-        # Constructing the welcome message parts
-        model_line = f"  Model: {FmtColors['GREEN']}{STYLES['BOLD']}{self.model}{RESET}"
+        """Main loop for the chat application using prompt_toolkit."""
+        # Use logger for startup info, which has its own color formatting.
+        self.logger.info(f"  Model: {FmtColors['GREEN']}{STYLES['BOLD']}{self.model}{RESET}")
+        self.logger.info("  Type /help for commands, or !<cmd> to run shell commands.\n")
 
-        # Active Rules status
-        num_active_rules = len(self.rule_manager.last_loaded_rule_names)
-        active_rules_names_sorted = sorted(list(self.rule_manager.last_loaded_rule_names))
-        
-        active_rules_status_output_str: str
-        if num_active_rules > 0:
-            max_names_to_show = 2 # Be concise for welcome message
-            names_str = ", ".join(active_rules_names_sorted[:max_names_to_show])
-            if num_active_rules > max_names_to_show:
-                names_str += f", ... ({num_active_rules - max_names_to_show} more)"
-            
-            active_rules_status_output_str = f"{FmtColors['GREEN']}{STYLES['BOLD']}Enabled ({num_active_rules}){RESET} [{names_str}]"
-        else:
-            # Using default terminal color (bolded) for none
-            active_rules_status_output_str = f"{STYLES['BOLD']}None{RESET}"
-        
-        active_rules_line = f"  Rules: {active_rules_status_output_str}"
-        help_line = f"  Type {FmtColors['CYAN']}{STYLES['BOLD']}/help{RESET} for commands, or {FmtColors['CYAN']}{STYLES['BOLD']}!<cmd>{RESET} to run shell commands. \n"
-
-        # Determine Docker status string
-        docker_status_output_str: str
-        if self.docker_manager and self.docker_manager.is_available:
-            if self.docker_manager.compose_file:
-                # Attempt to get a relative path for the compose file for cleaner display
-                compose_file_display_path = str(self.docker_manager.compose_file)
-                if self.docker_manager.root_dir and self.docker_manager.compose_file.is_relative_to(self.docker_manager.root_dir):
-                    compose_file_display_path = str(self.docker_manager.compose_file.relative_to(self.docker_manager.root_dir))
-                
-                docker_status_output_str = f"{FmtColors['GREEN']}{STYLES['BOLD']}Enabled{RESET} (compose: {FmtColors['CYAN']}{compose_file_display_path}{RESET})"
-            else:
-                docker_status_output_str = f"{FmtColors['YELLOW']}{STYLES['BOLD']}Enabled (no compose file detected){RESET}"
-        else:
-            docker_status_output_str = f"{STYLES['BOLD']}Disabled{RESET}"
-        
-        docker_line = f"  Docker: {docker_status_output_str}"
-
-        # Log each part on a new line for clarity
-        self.logger.info(model_line)
-        self.logger.info(docker_line) # Added Docker status line
-        self.logger.info(active_rules_line)
-        self.logger.info(help_line)
-        
-        ctrl_c_pressed_once = False # Initialize flag outside the loop
         while True:
             try:
-                # DO NOT reset ctrl_c_pressed_once = False here anymore
+                # 1. Build the prompt message
+                mode_str = self.get_app_mode()
+                prompt_message = FormattedText([
+                    ('class:prompt.mode', f'({mode_str})'),
+                    ('class:prompt.separator', ' > '),
+                ])
 
-                ring_bell()  # Ring the bell before input
-                inp = self.input_func() # This function handles its own KeyboardInterrupt by returning None
+                # 2. Build the right prompt (rprompt) with token info
+                token_breakdown = self._get_current_context_token_breakdown()
+                total_tokens = token_breakdown.get('total', 0)
+                
+                token_color_class = 'class:rprompt.tokens.low'
+                if total_tokens > 25000:
+                    token_color_class = 'class:rprompt.tokens.high'
+                elif total_tokens > 15000:
+                    token_color_class = 'class:rprompt.tokens.medium'
 
-                if inp is None:
-                    # Input was cancelled (Ctrl+C in readline loop or stdin read)
-                    if ctrl_c_pressed_once:
-                        print("\nExiting.", file=sys.stderr)
-                        break # Exit on second consecutive Ctrl+C during input
-                    else:
-                        ctrl_c_pressed_once = True
-                        print("\nInput cancelled. Press Ctrl+C again to exit.", file=sys.stderr)
-                        # Continue the loop to prompt for input again
-                        continue # Go to next loop iteration
+                rprompt_message = FormattedText([
+                    (token_color_class, f'{total_tokens:,}'),
+                    ('class:rprompt.text', ' tokens'),
+                ])
 
-                # --- If we get here, input was successful (not None) ---
-                # Reset the flag *after* successful input, before processing
-                ctrl_c_pressed_once = False
+                # 3. Get input from the user
+                ring_bell()
+                inp = self.prompt_session.prompt(
+                    prompt_message,
+                    rprompt=rprompt_message,
+                    style=self.style
+                )
 
-                # Strip leading/trailing whitespace
+                # 4. Process the input
                 processed_inp = inp.strip()
                 if not processed_inp:
-                    continue  # Skip empty input
+                    continue
 
-                # Process the valid input
                 status = self.run_one(processed_inp, preproc=True)
                 if not status:
-                    break  # Exit signal from run_one (e.g., /exit command)
+                    break # Exit signal from run_one (e.g., /exit command)
 
-            except KeyboardInterrupt:  # Handle Ctrl+C pressed *outside* the input function
-                self.spinner.stop()  # Ensure spinner is stopped on any interrupt that reaches here
-                if ctrl_c_pressed_once:
-                    print("\nExiting.", file=sys.stderr)
-                    break # Exit on second consecutive Ctrl+C (one outside input, one before/during)
-                else:
-                    ctrl_c_pressed_once = True
-                    print("\nOperation interrupted. Press Ctrl+C again to exit.", file=sys.stderr)
-                    # Continue the loop to prompt for input again
-                    continue
-            except EOFError:  # Handle Ctrl+D (still treated as exit)
+            except KeyboardInterrupt:
+                # User pressed Ctrl+C at the prompt.
+                # This will cancel the current input and prompt again.
+                continue
+            except EOFError:
+                # User pressed Ctrl+D.
                 print("\nExiting (EOF).", file=sys.stderr)
-                break  # Exit on Ctrl+D
+                break
 
         self._display_usage_summary()
         self.logger.info("Goodbye! 👋")

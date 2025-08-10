@@ -1,36 +1,23 @@
 import logging
 from pathlib import Path
-from typing import List, Set, Optional
+from typing import List, Set, Iterable, TYPE_CHECKING
 
-# readline is not available on all platforms (e.g., standard Windows cmd)
-try:
-    import readline
-    READLINE_AVAILABLE = True
-except ImportError:
-    READLINE_AVAILABLE = False
+from prompt_toolkit.completion import Completer, Completion
+from prompt_toolkit.document import Document
 
-if READLINE_AVAILABLE: # Guard readline-specific parts
-    # The following import is only needed if READLINE_AVAILABLE is True,
-    # but type checkers might complain if 'readline' is used conditionally without a type.
-    # However, we only call readline methods if READLINE_AVAILABLE is True.
-    pass
-
-
-# Forward declarations for type hinting
-if False:
+if TYPE_CHECKING:
     from tinycoder.file_manager import FileManager
     from tinycoder.git_manager import GitManager
 
 
-class CommandCompleter:
-    """A readline completer class specifically for TinyCoder commands."""
+class PTKCommandCompleter(Completer):
+    """A prompt_toolkit completer for TinyCoder commands."""
+
     def __init__(self, file_manager: 'FileManager', git_manager: 'GitManager'):
         self.file_manager = file_manager
-        self.file_options: List[str] = []
-        self.matches: List[str] = []
-        self.logger = logging.getLogger(__name__)
         self.git_manager = git_manager
-        
+        self.file_options: List[str] = []
+        self.logger = logging.getLogger(__name__)
         self._refresh_file_options()
 
     def _refresh_file_options(self):
@@ -41,64 +28,15 @@ class CommandCompleter:
             self.logger.debug(f"Refreshing file options for completion based on: {base_path}")
 
             # Always scan the filesystem for all available files
-            self.logger.debug("Scanning filesystem for all available files...")
-            excluded_dirs = {
-                '.git', '__pycache__', 'node_modules', '.venv', 'venv', 
-                '.tox', 'dist', 'build', 'eggs', '*.egg-info',
-                '.pytest_cache', '.mypy_cache', '.coverage', 'htmlcov',
-                '.tox', 'build', 'dist', '*.egg-info', 'migrations'
-            }
-            
-            # Get files from the repo map's get_py_files and get_html_files methods
-            try:
-                from tinycoder.repo_map import RepoMap
-                repo_map = RepoMap(str(base_path))
-                
-                # Add Python files
-                for py_file in repo_map.get_py_files():
-                    try:
-                        rel_path = py_file.relative_to(base_path)
-                        repo_files.add(str(rel_path).replace('\\', '/'))
-                    except ValueError:
-                        pass
-                
-                # Add HTML files
-                for html_file in repo_map.get_html_files():
-                    try:
-                        rel_path = html_file.relative_to(base_path)
-                        repo_files.add(str(rel_path).replace('\\', '/'))
-                    except ValueError:
-                        pass
-                
-                # Add other common file types
-                for ext in ['*.py', '*.html', '*.js', '*.css', '*.json', '*.yml', '*.yaml', 
-                           '*.md', '*.txt', '*.xml', '*.ini', '*.cfg', '*.toml']:
-                    try:
-                        for file_path in base_path.rglob(ext):
-                            # Check against excluded directories
-                            if any(excluded_dir in str(file_path).split('/') for excluded_dir in excluded_dirs):
-                                continue
-                            if file_path.is_file() and not file_path.name.startswith('.'):
-                                try:
-                                    rel_path = file_path.relative_to(base_path)
-                                    repo_files.add(str(rel_path).replace('\\', '/'))
-                                except ValueError:
-                                    pass
-                    except Exception:
-                        pass  # Ignore glob errors
-                        
-            except Exception:
-                # Fallback to simple directory walk if repo map fails
-                for item in base_path.rglob('*'):
-                    if any(excluded_dir in str(item).split('/') for excluded_dir in excluded_dirs):
-                        continue
-                    if item.is_file() and not item.name.startswith('.'):
-                        try:
-                            rel_path = item.relative_to(base_path)
-                            repo_files.add(str(rel_path).replace('\\', '/'))
-                        except ValueError:
-                            self.logger.warning(f"Could not make path relative: {item}")
+            from tinycoder.repo_map import RepoMap
+            repo_map = RepoMap(str(base_path))
 
+            # Add Python, HTML, and other common file types
+            for py_file in repo_map.get_py_files():
+                repo_files.add(str(py_file.relative_to(base_path)).replace('\\', '/'))
+            for html_file in repo_map.get_html_files():
+                repo_files.add(str(html_file.relative_to(base_path)).replace('\\', '/'))
+            
             # Include git-tracked files for completeness
             if self.git_manager and self.git_manager.is_repo():
                 tracked_files = self.git_manager.get_tracked_files_relative()
@@ -112,41 +50,46 @@ class CommandCompleter:
             self.logger.debug(f"Total unique file options for completion: {len(self.file_options)}")
 
         except Exception as e:
-            self.logger.error(f"Error refreshing file options for completion: {e}", exc_info=True)
-            # Fallback to just context files
+            self.logger.error(f"Error refreshing file options for completion: {e}", exc_info=self.logger.isEnabledFor(logging.DEBUG))
             self.file_options = sorted(list(self.file_manager.get_files()))
 
+    def get_completions(self, document: Document, complete_event) -> Iterable[Completion]:
+        """Yields completions for the current input."""
+        text_before_cursor = document.text_before_cursor
+        
+        # Simple command completion
+        commands = [
+            "/add ", "/drop ", "/clear", "/commit", "/undo", "/exit", "/quit", "/help",
+            "/mode ", "/lint", "/test", "/run", "/edit ", "/log ", "/rules", "/enable_rule ",
+            "/disable_rule ", "/repomap", "/suggest_files", "/exclude_from_repomap ",
+            "/include_in_repomap ", "/list_exclusions"
+        ]
 
-    def complete(self, text: str, state: int) -> Optional[str]:
-        """Readline completion handler."""
-        if not READLINE_AVAILABLE:
-            return None
+        if ' ' not in text_before_cursor:
+             # If we are completing the command itself
+            if text_before_cursor.startswith('/'):
+                for cmd in commands:
+                    if cmd.startswith(text_before_cursor):
+                        yield Completion(cmd, start_position=-len(text_before_cursor))
+            return
 
-        if state == 0:
-             self._refresh_file_options()
+        # Completion for commands with arguments
+        words = text_before_cursor.split()
+        if not words:
+            return
 
-        line = readline.get_line_buffer()
-        self.logger.debug(f"Readline complete called. Line: '{line}', Text: '{text}', State: {state}")
+        # File path completion for /add, /drop, /edit
+        if words[0] in ("/add", "/drop", "/edit"):
+            # Refresh options if user has been idle
+            # This is a simple heuristic. A more robust way could use a timer.
+            if complete_event.completion_requested:
+                self._refresh_file_options()
 
-        add_prefix = "/add "
-        if line.startswith(add_prefix):
-            path_text = line[len(add_prefix):]
-
-            if state == 0:
-                self.matches = sorted([
-                    p for p in self.file_options
-                    if p.startswith(path_text)
-                ])
-                self.logger.debug(f"Path text: '{path_text}', Options: {len(self.file_options)}, Matches found: {len(self.matches)}")
-                self.logger.debug(f"Matches: {self.matches[:5]}...")
-
-            try:
-                match = self.matches[state]
-                self.logger.debug(f"Returning match {state}: '{match}' (relative to path_text: '{path_text}')")
-                return match
-            except IndexError:
-                self.logger.debug(f"No more matches for state {state}")
-                return None
-
-        self.matches = []
-        return None
+            path_text = words[1] if len(words) > 1 else ""
+            for p in self.file_options:
+                if p.startswith(path_text):
+                    yield Completion(
+                        p,
+                        start_position=-len(path_text),
+                        display_meta='file'
+                    )

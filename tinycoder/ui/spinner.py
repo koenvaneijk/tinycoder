@@ -1,74 +1,46 @@
-import time
-import itertools
 import sys
-import threading
-
+import time
 
 class Spinner:
     """
-    A simple terminal spinner class using threading.
+    A simple, non-threaded terminal message displayer for synchronous operations.
+    It prints a message and provides a method to clear it.
 
     Usage:
         spinner = Spinner("Working...")
         spinner.start()
-        # Do some work...
-        time.sleep(5)
+        # Do some synchronous work...
+        time.sleep(2)
         spinner.stop()
         print("Done!")
     """
-
     def __init__(self, message: str = "Loading...", delay: float = 0.1):
         """
         Initializes the Spinner.
 
         Args:
-            message (str): The message to display before the spinner.
-            delay (float): The delay between spinner character updates in seconds.
+            message (str): The message to display.
+            delay (float): This is ignored in the non-threaded version but kept for compatibility.
         """
-        # Use Braille patterns for a smoother spinner
-        self.spinner = itertools.cycle(
-            ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
-        )
-        self.delay = delay
         self.message = message
-        self._stop_event = threading.Event()
-        self._thread = None
-
-    def _spin(self):
-        """The actual spinning loop."""
-        while not self._stop_event.is_set():
-            char = next(self.spinner)
-            # Write message, spinner character, and flush
-            sys.stdout.write(f"{self.message} {char}")
-            sys.stdout.flush()
-            # Wait for the delay, but wake up immediately if the event is set
-            self._stop_event.wait(self.delay)
-            # Erase the line using carriage return and spaces
-            sys.stdout.write("\r" + " " * (len(self.message) + 2) + "\r")
+        self._visible = False
 
     def start(self):
-        """Starts the spinner in a separate thread."""
-        if self._thread is not None and self._thread.is_alive():
-            return  # Already running
-
-        self._stop_event.clear()
-        # Make the thread a daemon so it exits when the main program exits
-        self._thread = threading.Thread(target=self._spin, daemon=True)
-        self._thread.start()
+        """Displays the message."""
+        if self._visible:
+            return
+        sys.stdout.write(self.message)
+        sys.stdout.flush()
+        self._visible = True
 
     def stop(self):
-        """Stops the spinner and cleans up the line."""
-        if self._stop_event.is_set():
-            return  # Already stopped or stopping
-
-        self._stop_event.set()
-        if self._thread:
-            self._thread.join()  # Wait for the thread to finish completely
-
-        # Clear the line completely after stopping (message + space + spinner char)
-        sys.stdout.write("\r" + " " * (len(self.message) + 3) + "\r")
+        """Stops the spinner by erasing the message from the line."""
+        if not self._visible:
+            return
+        # Erase the line using carriage return and spaces
+        sys.stdout.write("\r" + " " * len(self.message) + "\r")
         sys.stdout.flush()
-        self._thread = None  # Reset thread
+        self._visible = False
 
     def __enter__(self):
         """Starts spinner when entering context manager."""
@@ -79,42 +51,9 @@ class Spinner:
         """Stops spinner when exiting context manager."""
         self.stop()
 
-
 # Example Usage:
 if __name__ == "__main__":
     print("Starting example task...")
-
-    # Method 1: Manual start/stop
-    spinner1 = Spinner("Task 1 running...")
-    spinner1.start()
-    try:
-        # Simulate work
+    with Spinner("Task in progress..."):
         time.sleep(3)
-        print("\nInterrupting task 1...")
-        # Simulate a Ctrl+C interruption
-    except KeyboardInterrupt:
-        pass # Expected
-    finally:
-        spinner1.stop()
-    print("Task 1 finished.")
-
-    print("-" * 20)
-
-    # Method 2: Using context manager
-    print("Starting Task 2...")
-    with Spinner("Task 2 in progress..."):
-        # Simulate work
-        time.sleep(4)
-    print("Task 2 finished.")
-
-    print("-" * 20)
-
-    print("Starting Task 3 (quick)...")
-    with Spinner("Task 3...") as s:
-        time.sleep(1)
-        # You can update the message mid-spin if needed,
-        # but it requires stopping and starting or a more complex setup.
-        # For simplicity, this basic version doesn't support live message updates.
-    print("Task 3 finished.")
-
-    print("\nAll examples complete.")
+    print("Task finished.")

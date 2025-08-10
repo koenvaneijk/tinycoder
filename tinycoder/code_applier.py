@@ -1,11 +1,13 @@
 import difflib
-from typing import List, Tuple, Dict, Optional, Callable, Set
-
-from typing import TYPE_CHECKING
+from typing import List, Tuple, Dict, Optional, Callable, Set, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from tinycoder.file_manager import FileManager
     from tinycoder.git_manager import GitManager
+    from prompt_toolkit.styles import Style
+
+from prompt_toolkit import print_formatted_text
+from prompt_toolkit.formatted_text import FormattedText
 
 from tinycoder.linters.python_linter import PythonLinter
 from tinycoder.linters.html_linter import HTMLLinter
@@ -24,6 +26,7 @@ class CodeApplier:
         file_manager: "FileManager",
         git_manager: "GitManager",
         input_func: Callable[[str], str],
+        style: Optional["Style"] = None,
     ):
         """
         Initializes the CodeApplier.
@@ -32,11 +35,13 @@ class CodeApplier:
             file_manager: An instance of FileManager.
             git_manager: An instance of GitManager (used for context).
             input_func: Function to use for user input (like confirmation).
+            style: A prompt_toolkit Style object for colored output.
         """
         self.file_manager = file_manager
         self.git_manager = git_manager
         self.input_func = input_func
         self.logger = logging.getLogger(__name__)
+        self.style = style
 
         self.python_linter = PythonLinter()
         self.html_linter = HTMLLinter()
@@ -337,19 +342,7 @@ class CodeApplier:
         self, rel_path: str, original_content: str, new_content: str
     ) -> None:
         """
-        Prints a unified diff of changes between two strings to the console with expanded context.
-
-        Compares the original content with the new content and displays the differences
-        with more context lines (10 lines) and without the @@ markers for cleaner output.
-        Visually separates different edit sections for better readability.
-
-        Args:
-            rel_path: The relative path of the file being diffed, used in the diff header.
-            original_content: The original string content before the changes.
-            new_content: The new string content after the changes.
-
-        Side Effects:
-            Prints the diff output directly to the standard output using logger.
+        Prints a unified diff using prompt_toolkit for styled output.
         """
         diff = difflib.unified_diff(
             original_content.splitlines(keepends=True),
@@ -357,43 +350,27 @@ class CodeApplier:
             fromfile=f"{rel_path} (original)",
             tofile=f"{rel_path} (modified)",
             lineterm="",
-            n=10
+            n=10,
         )
         diff_output = list(diff)
-
         if not diff_output:
             return
 
-        self.logger.info(f"--- Diff for {COLORS['CYAN']}{rel_path}{RESET} ---")
-        diff_lines = []
-        in_edit_block = False
-        found_change = False
-        
+        formatted_diff = []
+        formatted_diff.append(("class:diff.header", f"--- Diff for {rel_path} ---\n"))
+
         for line in diff_output:
-            line = line.rstrip("\n")  # Remove trailing newline for cleaner printing
-            
-            if line.startswith("+++") or line.startswith("---"):
-                # Skip the file header lines for cleaner output
+            line = line.rstrip("\n")
+            if line.startswith("+++") or line.startswith("---") or line.startswith("@@"):
                 continue
-            elif line.startswith("@@"):
-                # When we hit a new @@ marker, insert a separator if we were in an edit block
-                if in_edit_block and found_change:
-                    diff_lines.append("-" * 40)  # Visual separator between edit sections
-                in_edit_block = True
-                found_change = False
-                continue  # Skip the @@ position markers
             
-            # Track if we've found any actual changes in this edit block
-            if line.startswith("+") or (line.startswith("-") and not line.startswith("---")):
-                found_change = True
-            
-            # Format the line with color
             if line.startswith("+"):
-                diff_lines.append(f"{COLORS['GREEN']}{line}{RESET}")
-            elif line.startswith("-") and not line.startswith("---"):
-                diff_lines.append(f"{COLORS['RED']}{line}{RESET}")
+                formatted_diff.append(("class:diff.plus", f"{line}\n"))
+            elif line.startswith("-"):
+                formatted_diff.append(("class:diff.minus", f"{line}\n"))
             else:
-                diff_lines.append(line)
-                
-        self.logger.info("\n".join(diff_lines))
-        self.logger.info(f"--- End Diff for {COLORS['CYAN']}{rel_path}{RESET} ---")
+                formatted_diff.append(("", f"{line}\n"))
+        
+        formatted_diff.append(("class:diff.header", f"--- End Diff for {rel_path} ---\n"))
+        
+        print_formatted_text(FormattedText(formatted_diff), style=self.style)
