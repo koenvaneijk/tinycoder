@@ -270,11 +270,13 @@ class App:
             'rprompt.tokens.high': 'fg:ansired',
             'rprompt.text': 'fg:ansibrightblack',
             # Bottom Toolbar
-            'bottom-toolbar': 'bg:#222222 fg:ansibrightblack',
-            'bottom-toolbar.text': 'bg:#222222 fg:ansibrightblack',
-            'bottom-toolbar.low': 'bg:#222222 fg:ansigreen',
-            'bottom-toolbar.medium': 'bg:#222222 fg:ansiyellow',
-            'bottom-toolbar.high': 'bg:#222222 fg:ansired bold',
+            'bottom-toolbar':          'bg:#222222 fg:#aaaaaa',      # Base style for the toolbar
+            'bottom-toolbar.label':    'bg:#222222 fg:#888888',      # For labels like "Prompt:", "Map:"
+            'bottom-toolbar.value':    'bg:#222222 fg:#dddddd',      # For the token values
+            'bottom-toolbar.separator':'bg:#222222 fg:#555555',      # For the '│' separator
+            'bottom-toolbar.low':      'bg:#222222 fg:ansigreen bold', # Total tokens (low)
+            'bottom-toolbar.medium':   'bg:#222222 fg:ansiyellow bold', # Total tokens (medium)
+            'bottom-toolbar.high':     'bg:#222222 fg:ansired bold',   # Total tokens (high)
             # Assistant & Markdown
             'assistant.header': 'bold fg:ansicyan',
             'markdown.h1': 'bold fg:ansiblue',
@@ -644,16 +646,26 @@ class App:
             total_color_class = 'class:bottom-toolbar.medium'
         
         # Construct the formatted text parts from the cached dictionary
-        return FormattedText([
-            ('class:bottom-toolbar.text', '  Total Context: '),
+        separator = ('class:bottom-toolbar.separator', ' │ ')
+        
+        parts = [
+            ('class:bottom-toolbar.label', '  CTX Total: '),
             (total_color_class, f'{total:,}'),
-            ('class:bottom-toolbar.text', ' tokens ('),
-            ('', f"Prompt/Rules: {breakdown.get('prompt_rules', 0):,}, "),
-            ('', f"Map: {breakdown.get('repo_map', 0):,}, "),
-            ('', f"Files: {breakdown.get('files', 0):,}, "),
-            ('', f"History: {breakdown.get('history', 0):,} "),
-            ('class:bottom-toolbar.text', ')'),
-        ])
+            separator,
+            ('class:bottom-toolbar.label', 'Prompt: '),
+            ('class:bottom-toolbar.value', f"{breakdown.get('prompt_rules', 0):,}"),
+            separator,
+            ('class:bottom-toolbar.label', 'Map: '),
+            ('class:bottom-toolbar.value', f"{breakdown.get('repo_map', 0):,}"),
+            separator,
+            ('class:bottom-toolbar.label', 'Files: '),
+            ('class:bottom-toolbar.value', f"{breakdown.get('files', 0):,}"),
+            separator,
+            ('class:bottom-toolbar.label', 'History: '),
+            ('class:bottom-toolbar.value', f"{breakdown.get('history', 0):,}  "),
+        ]
+
+        return FormattedText(parts)
 
     def _update_and_cache_token_breakdown(self) -> None:
         """
