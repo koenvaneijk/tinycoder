@@ -269,6 +269,12 @@ class App:
             'rprompt.tokens.medium': 'fg:ansiyellow',
             'rprompt.tokens.high': 'fg:ansired',
             'rprompt.text': 'fg:ansibrightblack',
+            # Bottom Toolbar
+            'bottom-toolbar': 'bg:#222222 fg:ansibrightblack',
+            'bottom-toolbar.text': 'bg:#222222 fg:ansibrightblack',
+            'bottom-toolbar.low': 'bg:#222222 fg:ansigreen',
+            'bottom-toolbar.medium': 'bg:#222222 fg:ansiyellow',
+            'bottom-toolbar.high': 'bg:#222222 fg:ansired bold',
             # Assistant & Markdown
             'assistant.header': 'bold fg:ansicyan',
             'markdown.h1': 'bold fg:ansiblue',
@@ -620,6 +626,32 @@ class App:
             return str(Path(self.git_root).resolve())
         else:
             return str(Path.cwd().resolve())
+
+    def _get_bottom_toolbar_tokens(self) -> FormattedText:
+        """
+        Generates the formatted text for the bottom toolbar, showing the token context.
+        """
+        breakdown = self._get_current_context_token_breakdown()
+        total = breakdown.get("total", 0)
+        
+        # Determine color based on total tokens
+        total_color_class = 'class:bottom-toolbar.low'
+        if total > 25000:
+            total_color_class = 'class:bottom-toolbar.high'
+        elif total > 15000:
+            total_color_class = 'class:bottom-toolbar.medium'
+        
+        # Construct the formatted text parts
+        return FormattedText([
+            ('class:bottom-toolbar.text', '  Total Context: '),
+            (total_color_class, f'{total:,}'),
+            ('class:bottom-toolbar.text', ' tokens ('),
+            ('', f"Prompt/Rules: {breakdown.get('prompt_rules', 0):,}, "),
+            ('', f"Map: {breakdown.get('repo_map', 0):,}, "),
+            ('', f"Files: {breakdown.get('files', 0):,}, "),
+            ('', f"History: {breakdown.get('history', 0):,} "),
+            ('class:bottom-toolbar.text', ')'),
+        ])
         
     def _get_current_context_token_breakdown(self) -> Dict[str, int]:
         """Calculates the approximate token count breakdown for the current context."""
@@ -1330,26 +1362,14 @@ class App:
                     ('class:prompt.separator', ' > '),
                 ])
 
-                # 2. Build the right prompt (rprompt) with token info
-                token_breakdown = self._get_current_context_token_breakdown()
-                total_tokens = token_breakdown.get('total', 0)
-                
-                token_color_class = 'class:rprompt.tokens.low'
-                if total_tokens > 25000:
-                    token_color_class = 'class:rprompt.tokens.high'
-                elif total_tokens > 15000:
-                    token_color_class = 'class:rprompt.tokens.medium'
-
-                rprompt_message = FormattedText([
-                    (token_color_class, f'{total_tokens:,}'),
-                    ('class:rprompt.text', ' tokens'),
-                ])
+                # 2. Build the bottom toolbar with token info
+                bottom_toolbar = self._get_bottom_toolbar_tokens
 
                 # 3. Get input from the user
                 ring_bell()
                 inp = self.prompt_session.prompt(
                     prompt_message,
-                    rprompt=rprompt_message,
+                    bottom_toolbar=bottom_toolbar,
                     style=self.style
                 )
 

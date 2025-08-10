@@ -57,12 +57,31 @@ class PTKCommandCompleter(Completer):
         """Yields completions for the current input."""
         text_before_cursor = document.text_before_cursor
         
-        # Simple command completion
+        # Exhaustive list of all available slash commands.
+        # Commands expecting an argument have a trailing space.
         commands = [
-            "/add ", "/drop ", "/clear", "/commit", "/undo", "/exit", "/quit", "/help",
-            "/mode ", "/lint", "/test", "/run", "/edit ", "/log ", "/rules", "/enable_rule ",
-            "/disable_rule ", "/repomap", "/suggest_files", "/exclude_from_repomap ",
-            "/include_in_repomap ", "/list_exclusions"
+            "/add ",
+            "/clear",
+            "/commit",
+            "/disable_rule ",
+            "/drop ",
+            "/edit ",
+            "/enable_rule ",
+            "/exclude_from_repomap ",
+            "/exit",
+            "/help",
+            "/include_in_repomap ",
+            "/lint",
+            "/list_exclusions",
+            "/log ",
+            "/mode ",
+            "/quit",
+            "/repomap",
+            "/rules",
+            "/run",
+            "/suggest_files",
+            "/test",
+            "/undo",
         ]
 
         if ' ' not in text_before_cursor:
