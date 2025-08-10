@@ -270,9 +270,7 @@ class App:
             'rprompt.tokens.high': 'fg:ansired',
             'rprompt.text': 'fg:ansibrightblack',
             # Bottom Toolbar
-            'bottom-toolbar':          'bg:#222222 fg:#aaaaaa',      # Base style for the toolbar
-            'bottom-toolbar.text':     'bg:#222222 fg:#888888',      # For static text/labels in the toolbar
-            'bottom-toolbar.value':    'bg:#222222 fg:#dddddd',      # For token values in the breakdown
+            'bottom-toolbar':          'bg:#222222 fg:#aaaaaa',      # Base style for the toolbar, single background
             'bottom-toolbar.low':      'bg:#222222 fg:ansigreen bold', # Total tokens (low)
             'bottom-toolbar.medium':   'bg:#222222 fg:ansiyellow bold', # Total tokens (medium)
             'bottom-toolbar.high':     'bg:#222222 fg:ansired bold',   # Total tokens (high)
@@ -644,19 +642,14 @@ class App:
         elif total > 15000:
             total_color_class = 'class:bottom-toolbar.medium'
         
-        # A more condensed format:  Total: 12,345 (P:123 M:456 F:789 H:10)
+        # Full word descriptions, single style for most text
         parts = [
-            ('class:bottom-toolbar.text', '  Total: '),
+            ('class:bottom-toolbar', '  Context: '),
             (total_color_class, f'{total:,}'),
-            ('class:bottom-toolbar.text', ' (P:'),
-            ('class:bottom-toolbar.value', f"{breakdown.get('prompt_rules', 0):,}" ),
-            ('class:bottom-toolbar.text', ' M:'),
-            ('class:bottom-toolbar.value', f"{breakdown.get('repo_map', 0):,}" ),
-            ('class:bottom-toolbar.text', ' F:'),
-            ('class:bottom-toolbar.value', f"{breakdown.get('files', 0):,}" ),
-            ('class:bottom-toolbar.text', ' H:'),
-            ('class:bottom-toolbar.value', f"{breakdown.get('history', 0):,}" ),
-            ('class:bottom-toolbar.text', ')  '),
+            ('class:bottom-toolbar', f" (Prompt: {breakdown.get('prompt_rules', 0):,} | "),
+            ('class:bottom-toolbar', f"Map: {breakdown.get('repo_map', 0):,} | "),
+            ('class:bottom-toolbar', f"Files: {breakdown.get('files', 0):,} | "),
+            ('class:bottom-toolbar', f"History: {breakdown.get('history', 0):,})  "),
         ]
 
         return FormattedText(parts)
