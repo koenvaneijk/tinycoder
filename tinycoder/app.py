@@ -53,6 +53,7 @@ class App:
         self._setup_rules_manager()
         self._init_input_preprocessor() # Initialize InputPreprocessor
         self._init_prompt_session() # Initialize PromptSession and styles
+        self._reconfigure_logging_for_ptk() # Switch to prompt_toolkit-aware logging
         self._init_app_state()
         self._init_command_handler()
         self._init_app_components()
@@ -210,6 +211,37 @@ class App:
         )
         self.logger.debug("RuleManager initialized.")
 
+    def _reconfigure_logging_for_ptk(self) -> None:
+        """
+        Swaps the initial StreamHandler with a prompt_toolkit-based handler
+        to ensure logging integrates smoothly with the prompt session.
+        This is called after startup messages are logged.
+        """
+        root_logger = logging.getLogger()
+        old_handler = None
+        
+        # Find the existing stream handler
+        for handler in root_logger.handlers[:]:
+            if isinstance(handler, logging.StreamHandler):
+                old_handler = handler
+                break
+        
+        if not old_handler:
+            self.logger.debug("No existing StreamHandler found to replace. Skipping log reconfiguration.")
+            return
+
+        # Create the new handler and give it the same formatter and level as the old one
+        from tinycoder.ui.log_formatter import PromptToolkitLogHandler
+        ptk_handler = PromptToolkitLogHandler(self.style)
+        ptk_handler.setFormatter(old_handler.formatter)
+        ptk_handler.setLevel(old_handler.level)
+        
+        # Replace the old handler with the new one
+        root_logger.removeHandler(old_handler)
+        root_logger.addHandler(ptk_handler)
+
+        self.logger.debug("Logging reconfigured to use PromptToolkitLogHandler.")
+
     def _init_prompt_session(self) -> None:
         """Initializes the prompt_toolkit session, completer, and style."""
         # Setup history file
@@ -230,12 +262,14 @@ class App:
 
         # Central style for the application
         self.style = Style.from_dict({
+            # Prompt
             'prompt.mode': 'bold fg:ansigreen',
             'prompt.separator': 'fg:ansibrightblack',
             'rprompt.tokens.low': 'fg:ansigreen',
             'rprompt.tokens.medium': 'fg:ansiyellow',
             'rprompt.tokens.high': 'fg:ansired',
             'rprompt.text': 'fg:ansibrightblack',
+            # Assistant & Markdown
             'assistant.header': 'bold fg:ansicyan',
             'markdown.h1': 'bold fg:ansiblue',
             'markdown.h2': 'bold fg:ansimagenta',
@@ -244,9 +278,16 @@ class App:
             'markdown.code': 'fg:ansiyellow',
             'markdown.code-block': 'fg:ansigreen',
             'markdown.list': 'fg:ansicyan',
+            # Diffs
             'diff.header': 'bold',
             'diff.plus': 'fg:ansigreen',
             'diff.minus': 'fg:ansired',
+            # Logging
+            'log.debug': 'fg:#888888',
+            'log.info': '', # Default terminal color
+            'log.warning': 'fg:ansiyellow',
+            'log.error': 'fg:ansired',
+            'log.critical': 'bold fg:ansired',
         })
         self.logger.debug("Application style defined.")
 

@@ -72,6 +72,40 @@ STYLES = {
 RESET = "\033[0m"
 
 
+from typing import TYPE_CHECKING
+from prompt_toolkit import print_formatted_text
+from prompt_toolkit.formatted_text import FormattedText
+
+if TYPE_CHECKING:
+    from prompt_toolkit.styles import Style
+
+
+class PromptToolkitLogHandler(logging.Handler):
+    """
+    A logging handler that prints records using prompt_toolkit's styled output,
+    correctly interpreting ANSI codes from a formatter like ColorLogFormatter.
+    This prevents logging from interfering with an active prompt_toolkit session.
+    """
+    def __init__(self, style: "Style"):
+        super().__init__()
+        self.style = style
+
+    def emit(self, record: logging.LogRecord) -> None:
+        """Formats and prints the log record using prompt_toolkit."""
+        try:
+            # Format the message. The handler's formatter (e.g., ColorLogFormatter)
+            # will do the work of creating the string with ANSI codes.
+            message = self.format(record)
+            
+            # Convert the ANSI-formatted string to a list of styled fragments.
+            formatted_message = FormattedText.from_ansi(message)
+            
+            # Print using prompt_toolkit's thread-safe print function.
+            print_formatted_text(formatted_message, style=self.style, end='\n')
+        except Exception:
+            self.handleError(record)
+
+
 class ColorLogFormatter(logging.Formatter):
     """
     A logging formatter that adds ANSI color and style codes based on log level.
