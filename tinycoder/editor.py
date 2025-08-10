@@ -11,8 +11,7 @@ from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.layout.layout import Layout
 from prompt_toolkit.lexers import PygmentsLexer, DynamicLexer
 from prompt_toolkit.styles import Style, StyleTransformation, Attrs
-from prompt_toolkit.widgets import Dialog, Button, Label
-from prompt_toolkit.layout.toolbars import SearchToolbar
+from prompt_toolkit.widgets import Dialog, Button, Label, SearchToolbar
 
 from pygments.lexers import get_lexer_for_filename, guess_lexer
 from pygments.util import ClassNotFound
