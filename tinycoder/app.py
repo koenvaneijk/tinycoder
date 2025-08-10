@@ -317,6 +317,7 @@ class App:
         self.include_repo_map: bool = True # Default to including the repo map
         self.total_input_tokens: int = 0
         self.total_output_tokens: int = 0
+        self.cached_token_breakdown: Dict[str, int] = {} # For UI performance
         self.logger.debug("Basic app state initialized (commits, mode, lint status, repo map toggle, usage tracking).")
 
     def toggle_repo_map(self, state: bool) -> None:
@@ -629,9 +630,10 @@ class App:
 
     def _get_bottom_toolbar_tokens(self) -> FormattedText:
         """
-        Generates the formatted text for the bottom toolbar, showing the token context.
+        Generates the formatted text for the bottom toolbar from cached token context.
+        This function must be extremely fast as it's called on every redraw.
         """
-        breakdown = self._get_current_context_token_breakdown()
+        breakdown = self.cached_token_breakdown
         total = breakdown.get("total", 0)
         
         # Determine color based on total tokens
@@ -641,7 +643,7 @@ class App:
         elif total > 15000:
             total_color_class = 'class:bottom-toolbar.medium'
         
-        # Construct the formatted text parts
+        # Construct the formatted text parts from the cached dictionary
         return FormattedText([
             ('class:bottom-toolbar.text', '  Total Context: '),
             (total_color_class, f'{total:,}'),
@@ -652,6 +654,14 @@ class App:
             ('', f"History: {breakdown.get('history', 0):,} "),
             ('class:bottom-toolbar.text', ')'),
         ])
+
+    def _update_and_cache_token_breakdown(self) -> None:
+        """
+        Performs the expensive token calculation and caches the result.
+        This should only be called when the context has actually changed.
+        """
+        self.cached_token_breakdown = self._get_current_context_token_breakdown()
+        self.logger.debug("Token context breakdown cache updated.")
         
     def _get_current_context_token_breakdown(self) -> Dict[str, int]:
         """Calculates the approximate token count breakdown for the current context."""
@@ -1349,6 +1359,9 @@ class App:
 
     def run(self):
         """Main loop for the chat application using prompt_toolkit."""
+        # Initial token calculation before the first prompt
+        self._update_and_cache_token_breakdown()
+
         # Use logger for startup info, which has its own color formatting.
         self.logger.info(f"  Model: {FmtColors['GREEN']}{STYLES['BOLD']}{self.model}{RESET}")
         self.logger.info("  Type /help for commands, or !<cmd> to run shell commands.\n")
@@ -1381,6 +1394,9 @@ class App:
                 status = self.run_one(processed_inp, preproc=True)
                 if not status:
                     break # Exit signal from run_one (e.g., /exit command)
+
+                # 5. Update the token cache for the *next* prompt render.
+                self._update_and_cache_token_breakdown()
 
             except KeyboardInterrupt:
                 # User pressed Ctrl+C at the prompt.
