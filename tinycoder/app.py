@@ -271,9 +271,8 @@ class App:
             'rprompt.text': 'fg:ansibrightblack',
             # Bottom Toolbar
             'bottom-toolbar':          'bg:#222222 fg:#aaaaaa',      # Base style for the toolbar
-            'bottom-toolbar.label':    'bg:#222222 fg:#888888',      # For labels like "Prompt:", "Map:"
-            'bottom-toolbar.value':    'bg:#222222 fg:#dddddd',      # For the token values
-            'bottom-toolbar.separator':'bg:#222222 fg:#555555',      # For the '│' separator
+            'bottom-toolbar.text':     'bg:#222222 fg:#888888',      # For static text/labels in the toolbar
+            'bottom-toolbar.value':    'bg:#222222 fg:#dddddd',      # For token values in the breakdown
             'bottom-toolbar.low':      'bg:#222222 fg:ansigreen bold', # Total tokens (low)
             'bottom-toolbar.medium':   'bg:#222222 fg:ansiyellow bold', # Total tokens (medium)
             'bottom-toolbar.high':     'bg:#222222 fg:ansired bold',   # Total tokens (high)
@@ -645,24 +644,19 @@ class App:
         elif total > 15000:
             total_color_class = 'class:bottom-toolbar.medium'
         
-        # Construct the formatted text parts from the cached dictionary
-        separator = ('class:bottom-toolbar.separator', ' │ ')
-        
+        # A more condensed format:  Total: 12,345 (P:123 M:456 F:789 H:10)
         parts = [
-            ('class:bottom-toolbar.label', '  CTX Total: '),
+            ('class:bottom-toolbar.text', '  Total: '),
             (total_color_class, f'{total:,}'),
-            separator,
-            ('class:bottom-toolbar.label', 'Prompt: '),
-            ('class:bottom-toolbar.value', f"{breakdown.get('prompt_rules', 0):,}"),
-            separator,
-            ('class:bottom-toolbar.label', 'Map: '),
-            ('class:bottom-toolbar.value', f"{breakdown.get('repo_map', 0):,}"),
-            separator,
-            ('class:bottom-toolbar.label', 'Files: '),
-            ('class:bottom-toolbar.value', f"{breakdown.get('files', 0):,}"),
-            separator,
-            ('class:bottom-toolbar.label', 'History: '),
-            ('class:bottom-toolbar.value', f"{breakdown.get('history', 0):,}  "),
+            ('class:bottom-toolbar.text', ' (P:'),
+            ('class:bottom-toolbar.value', f"{breakdown.get('prompt_rules', 0):,}" ),
+            ('class:bottom-toolbar.text', ' M:'),
+            ('class:bottom-toolbar.value', f"{breakdown.get('repo_map', 0):,}" ),
+            ('class:bottom-toolbar.text', ' F:'),
+            ('class:bottom-toolbar.value', f"{breakdown.get('files', 0):,}" ),
+            ('class:bottom-toolbar.text', ' H:'),
+            ('class:bottom-toolbar.value', f"{breakdown.get('history', 0):,}" ),
+            ('class:bottom-toolbar.text', ')  '),
         ]
 
         return FormattedText(parts)
