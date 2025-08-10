@@ -74,7 +74,7 @@ RESET = "\033[0m"
 
 from typing import TYPE_CHECKING
 from prompt_toolkit import print_formatted_text
-from prompt_toolkit.formatted_text import FormattedText
+from prompt_toolkit.formatted_text import FormattedText, ANSI
 
 if TYPE_CHECKING:
     from prompt_toolkit.styles import Style
@@ -98,7 +98,7 @@ class PromptToolkitLogHandler(logging.Handler):
             message = self.format(record)
             
             # Convert the ANSI-formatted string to a list of styled fragments.
-            formatted_message = FormattedText.from_ansi(message)
+            formatted_message = ANSI(message)
             
             # Print using prompt_toolkit's thread-safe print function.
             print_formatted_text(formatted_message, style=self.style, end='\n')

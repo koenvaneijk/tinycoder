@@ -1324,7 +1324,7 @@ class App:
         while True:
             try:
                 # 1. Build the prompt message
-                mode_str = self.get_app_mode()
+                mode_str = self.mode
                 prompt_message = FormattedText([
                     ('class:prompt.mode', f'({mode_str})'),
                     ('class:prompt.separator', ' > '),
