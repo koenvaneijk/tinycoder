@@ -5,7 +5,7 @@ import re # Added for markdown formatting
 import sys
 import traceback
 from pathlib import Path
-from typing import List, Set, Dict, Optional
+from typing import List, Set, Dict, Optional, Tuple
 
 from prompt_toolkit import PromptSession, print_formatted_text
 from prompt_toolkit.completion import Completer
