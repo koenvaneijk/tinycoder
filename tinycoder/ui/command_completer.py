@@ -84,31 +84,46 @@ class PTKCommandCompleter(Completer):
             "/undo",
         ]
 
-        if ' ' not in text_before_cursor:
-             # If we are completing the command itself
-            if text_before_cursor.startswith('/'):
+        text_before_cursor_stripped = text_before_cursor.lstrip()
+        words = text_before_cursor_stripped.split()
+
+        # If we are completing the command itself
+        if len(words) <= 1 and not text_before_cursor.endswith(' '):
+            if text_before_cursor_stripped.startswith('/'):
+                command_text = words[0] if words else ""
                 for cmd in commands:
-                    if cmd.startswith(text_before_cursor):
-                        yield Completion(cmd, start_position=-len(text_before_cursor))
+                    if cmd.startswith(command_text):
+                        yield Completion(cmd, start_position=-len(command_text))
             return
 
-        # Completion for commands with arguments
-        words = text_before_cursor.split()
+        # If we are completing arguments
         if not words:
             return
 
+        command = words[0]
+        arg_text = words[-1] if len(words) > 1 and not text_before_cursor.endswith(' ') else ""
+
+        # --- Argument Completion Logic ---
+
         # File path completion for /add, /drop, /edit
-        if words[0] in ("/add", "/drop", "/edit"):
-            # Refresh options if user has been idle
-            # This is a simple heuristic. A more robust way could use a timer.
+        if command in ("/add", "/drop", "/edit"):
             if complete_event.completion_requested:
                 self._refresh_file_options()
-
-            path_text = words[1] if len(words) > 1 else ""
             for p in self.file_options:
-                if p.startswith(path_text):
+                if p.startswith(arg_text):
                     yield Completion(
                         p,
-                        start_position=-len(path_text),
+                        start_position=-len(arg_text),
                         display_meta='file'
+                    )
+        
+        # Mode completion
+        elif command == "/mode":
+            modes = ["code", "ask"]
+            for m in modes:
+                if m.startswith(arg_text):
+                    yield Completion(
+                        m,
+                        start_position=-len(arg_text),
+                        display_meta='mode'
                     )

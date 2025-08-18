@@ -47,7 +47,7 @@ class CodeApplier:
         self.html_linter = HTMLLinter()
         self.css_validator = CssValidator()
 
-    def apply_edits(
+    async def apply_edits(
         self, edits: List[Tuple[str, str, str]]
     ) -> Tuple[bool, List[int], Set[str], Dict[str, str]]:
         """
@@ -118,9 +118,10 @@ class CodeApplier:
                         allow_edit = False
                         self.logger.warning(f"Skipping creation of {COLORS['CYAN']}{rel_path}{RESET} due to 'skip all' decision.")
                     else:
-                        confirm = self.input_func(
+                        confirm = await self.input_func(
                             f"LLM wants to create new file '{COLORS['CYAN']}{rel_path}{RESET}'. Allow? (y/N/a[llow all]/s[kip all]): "
-                        ).lower()
+                        )
+                        confirm = confirm.lower()
                         if confirm in ['y', 'yes', 'a', 'allow all']:
                             allow_edit = True
                             if confirm in ['a', 'allow all']:
@@ -130,7 +131,7 @@ class CodeApplier:
                             if confirm in ['s', 'skip all']:
                                 creation_decision = 'skip_all'
                 else: # File exists, but is not in context
-                    confirm = self.input_func(
+                    confirm = await self.input_func(
                         f"LLM wants to edit '{COLORS['CYAN']}{rel_path}{RESET}' which is not in the chat. Allow? (y/N): "
                     )
                     if confirm.lower() == 'y':

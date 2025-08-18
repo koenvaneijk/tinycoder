@@ -1,45 +1,44 @@
+import sys
+import threading
 import time
-from prompt_toolkit import print_formatted_text
+from itertools import cycle
 
 class Spinner:
-    """
-    A simple, non-threaded terminal message displayer for synchronous operations,
-    integrated with prompt_toolkit's printing system to avoid UI glitches.
-
-    Usage:
-        spinner = Spinner("Working...")
-        spinner.start()
-        # Do some synchronous work...
-        time.sleep(2)
-        spinner.stop()
-    """
+    """A simple terminal spinner that runs in a separate thread."""
     def __init__(self, message: str = "Loading...", delay: float = 0.1):
-        """
-        Initializes the Spinner.
-
-        Args:
-            message (str): The message to display.
-            delay (float): This is ignored in the non-threaded version but kept for compatibility.
-        """
+        self.spinner = cycle(['-', '/', '|', '\\'])
+        self.delay = delay
         self.message = message
-        self._visible = False
+        self.running = False
+        self.spinner_thread = None
 
     def start(self):
-        """Displays the message using prompt_toolkit's printing function."""
-        if self._visible:
-            return
-        # Use prompt_toolkit's print function but without a newline to keep it on the same line.
-        print_formatted_text(self.message, end='')
-        self._visible = True
+        """Starts the spinner in a separate thread."""
+        self.running = True
+        self.spinner_thread = threading.Thread(target=self._spin)
+        self.spinner_thread.daemon = True
+        self.spinner_thread.start()
+
+    def _spin(self):
+        """The private method that runs the spinner loop."""
+        while self.running:
+            # Use \r to return to the beginning of the line
+            sys.stdout.write(f"\r{self.message} {next(self.spinner)}")
+            sys.stdout.flush()
+            time.sleep(self.delay)
 
     def stop(self):
-        """Stops the spinner by erasing the message from the line using prompt_toolkit."""
-        if not self._visible:
+        """Stops the spinner and cleans up the line."""
+        if not self.running:
             return
-        # Print carriage return and spaces to clear the line, without a newline.
-        clear_line = '\r' + ' ' * len(self.message) + '\r'
-        print_formatted_text(clear_line, end='')
-        self._visible = False
+            
+        self.running = False
+        if self.spinner_thread:
+            self.spinner_thread.join(timeout=1.0)
+        
+        # Clear the line by writing spaces and returning to the beginning
+        sys.stdout.write('\r' + ' ' * (len(self.message) + 2) + '\r')
+        sys.stdout.flush()
 
     def __enter__(self):
         """Starts spinner when entering context manager."""
@@ -52,9 +51,15 @@ class Spinner:
 
 # Example Usage:
 if __name__ == "__main__":
-    # This example won't work correctly standalone as it needs a prompt_toolkit app running.
-    # It serves as a structural example.
-    print("Starting example task...")
-    with Spinner("Task in progress..."):
-        time.sleep(3)
-    print("\nTask finished.")
+    print("This spinner is a simple threaded CLI spinner.")
+    with Spinner("Processing data..."):
+        time.sleep(5)
+    print("Done!")
+
+    # Another example
+    spinner = Spinner("Thinking hard...", 0.2)
+    spinner.start()
+    time.sleep(3)
+    spinner.stop()
+    print("Finished thinking.")
+    
