@@ -630,8 +630,8 @@ class App:
     async def _prompt_for_confirmation(self, prompt_text: str) -> str:
         """Async user prompt for confirmations within the main app loop."""
         ring_bell()
-        # prompt_session.prompt is awaitable when an asyncio event loop is running
-        return await self.prompt_session.prompt(prompt_text)
+        # Use prompt_async for async contexts
+        return await self.prompt_session.prompt_async(prompt_text)
 
     def _get_bottom_toolbar_tokens(self) -> FormattedText:
         """
@@ -1385,7 +1385,7 @@ class App:
 
                 # 3. Get input from the user
                 ring_bell()
-                inp = await self.prompt_session.prompt(
+                inp = await self.prompt_session.prompt_async(
                     prompt_message,
                     bottom_toolbar=bottom_toolbar,
                     style=self.style
