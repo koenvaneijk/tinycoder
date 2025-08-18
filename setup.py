@@ -16,6 +16,9 @@ setuptools.setup(
     url="https://github.com/koenvaneijk/tinycoder",
     packages=setuptools.find_packages(),
     include_package_data=True,
+    install_requires=[
+        "prompt_toolkit",
+    ],
     entry_points={
         "console_scripts": [
             "tinycoder=tinycoder:main",
