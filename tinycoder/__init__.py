@@ -1,6 +1,7 @@
 from tinycoder.app import App
 import os
 import argparse
+import asyncio
 
 from tinycoder.preferences import save_user_preference, load_user_preference_model
 from tinycoder.ui.log_formatter import COLORS, RESET
@@ -96,7 +97,7 @@ def main():
             else:
                 model_str = model_name
         elif args.provider == "gemini":
-            model_name = args.model or "gemini-2.5-pro-preview-05-06"
+            model_name = args.model or "gemini-2.5-pro"
             if not model_name.startswith("gemini-"):
                 model_str = f"gemini-{model_name}"
             else:
@@ -132,9 +133,9 @@ def main():
 
     if args.code:
         coder.mode = "code"
-        coder.run_one(args.code, preproc=False, non_interactive=True)
+        asyncio.run(coder.run_one(args.code, preproc=False, non_interactive=True))
     else:
-        coder.run()
+        asyncio.run(coder.run())
 
 if __name__ == "__main__":
     main()

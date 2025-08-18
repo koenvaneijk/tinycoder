@@ -437,7 +437,7 @@ class App:
         self.code_applier = CodeApplier(
             file_manager=self.file_manager,
             git_manager=self.git_manager,
-            input_func=prompt_user_input, # Use centralized input for confirmations
+            input_func=self._prompt_for_confirmation, # Use centralized input for confirmations
             style=self.style, # Pass style for diff printing
         )
         # Initialize ShellExecutor
@@ -626,6 +626,12 @@ class App:
             return str(Path(self.git_root).resolve())
         else:
             return str(Path.cwd().resolve())
+
+    async def _prompt_for_confirmation(self, prompt_text: str) -> str:
+        """Async user prompt for confirmations within the main app loop."""
+        ring_bell()
+        # prompt_session.prompt is awaitable when an asyncio event loop is running
+        return await self.prompt_session.prompt(prompt_text)
 
     def _get_bottom_toolbar_tokens(self) -> FormattedText:
         """
@@ -914,7 +920,7 @@ class App:
                 "tool", f"Undid commit {last_hash}"
             )
 
-    def _handle_llm_file_requests(self, requested_files_from_llm: List[str]) -> bool:
+    async def _handle_llm_file_requests(self, requested_files_from_llm: List[str]) -> bool:
         """
         Handles LLM's request for additional files.
         Checks existence, prompts user, adds files, and sets up reflection.
@@ -972,7 +978,7 @@ class App:
             self.logger.info(f"  {i+1}. {FmtColors['CYAN']}{fname}{RESET}")
         
         confirm_prompt = "Add these files to context? (y/N, or list indices like '1,3'): "
-        confirm = prompt_user_input(confirm_prompt).strip().lower()
+        confirm = (await self._prompt_for_confirmation(confirm_prompt)).strip().lower()
 
         if not confirm: # Handles cancellation from prompt_user_input
             self.logger.info("\nFile addition (from LLM request) cancelled by user.")
@@ -1076,7 +1082,7 @@ class App:
         # Use print() to ensure the summary is always visible regardless of log level
         print(summary_message)
 
-    def process_user_input(self, non_interactive: bool = False):
+    async def process_user_input(self, non_interactive: bool = False):
         """Processes the latest user input (already in history), sends to LLM, handles response."""
         response = self._send_to_llm()
 
@@ -1090,7 +1096,7 @@ class App:
 
             # --- Handle File Requests First ---
             if requested_files:
-                if self._handle_llm_file_requests(requested_files):
+                if await self._handle_llm_file_requests(requested_files):
                     # A reflection message is set (e.g., files added, user cancelled).
                     # The run_one loop will pick this up. We are done for this turn.
                     return 
@@ -1101,7 +1107,7 @@ class App:
             if not self.reflected_message and self.mode == "code":
                 if edits:
                     all_succeeded, failed_indices, modified_files, lint_errors = (
-                        self.code_applier.apply_edits(edits)
+                        await self.code_applier.apply_edits(edits)
                     )
                     self.lint_errors_found = lint_errors 
 
@@ -1137,7 +1143,7 @@ class App:
                     combined_errors = "\n".join(error_messages)
                     self.logger.error(combined_errors)
 
-                    fix_lint = prompt_user_input("Attempt to fix lint errors? (y/N): ")
+                    fix_lint = await self._prompt_for_confirmation("Attempt to fix lint errors? (y/N): ")
                     if fix_lint.lower() == "y":
                         self.reflected_message = combined_errors
             
@@ -1238,7 +1244,7 @@ class App:
         return formatted_text
 
 
-    def _handle_command(self, user_message: str) -> bool:
+    async def _handle_command(self, user_message: str) -> bool:
         """
         Handles a command input. Returns False if the command is to exit, True otherwise.
         May modify self.mode.
@@ -1252,12 +1258,12 @@ class App:
         if prompt_arg:
             # If command included a prompt (e.g., /ask "What?"), process it *now*
             # Don't preprocess command arguments (e.g., URL check)
-            if not self.run_one(prompt_arg, preproc=False):
+            if not await self.run_one(prompt_arg, preproc=False):
                 return False  # Exit signal from processing the prompt
 
         return True  # Continue processing
 
-    def run_one(self, user_message, preproc, non_interactive=False):
+    async def run_one(self, user_message, preproc, non_interactive=False):
         """
         Processes a single user message, including potential reflection loops in interactive mode.
 
@@ -1270,7 +1276,7 @@ class App:
 
         if preproc:
             if user_message.startswith("/"):
-                if not self._handle_command(user_message):
+                if not await self._handle_command(user_message):
                     return False  # Exit signal
                 else:
                     return True  # Command handled, stop further processing for this input cycle
@@ -1328,7 +1334,7 @@ class App:
 
         # Initial processing of the user message
         self.history_manager.add_message("user", message)  # Use history manager
-        self.process_user_input(non_interactive=non_interactive)  # This now handles LLM call, edits, linting
+        await self.process_user_input(non_interactive=non_interactive)  # This now handles LLM call, edits, linting
 
         # Check if reflection is needed *and* allowed (interactive mode)
         while not non_interactive and self.reflected_message:
@@ -1352,11 +1358,11 @@ class App:
 
             # Add the reflected message to history *before* processing
             self.history_manager.add_message("user", message)
-            self.process_user_input(non_interactive=non_interactive)  # Process the reflected input
+            await self.process_user_input(non_interactive=non_interactive)  # Process the reflected input
 
         return True  # Indicate normal processing occurred (or finished reflection loop)
 
-    def run(self):
+    async def run(self):
         """Main loop for the chat application using prompt_toolkit."""
         # Initial token calculation before the first prompt
         self._update_and_cache_token_breakdown()
@@ -1379,7 +1385,7 @@ class App:
 
                 # 3. Get input from the user
                 ring_bell()
-                inp = self.prompt_session.prompt(
+                inp = await self.prompt_session.prompt(
                     prompt_message,
                     bottom_toolbar=bottom_toolbar,
                     style=self.style
@@ -1390,7 +1396,7 @@ class App:
                 if not processed_inp:
                     continue
 
-                status = self.run_one(processed_inp, preproc=True)
+                status = await self.run_one(processed_inp, preproc=True)
                 if not status:
                     break # Exit signal from run_one (e.g., /exit command)
 
