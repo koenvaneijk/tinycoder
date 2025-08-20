@@ -48,7 +48,7 @@ def main():
     # New provider selection argument
     parser.add_argument(
         "--provider",
-        choices=["anthropic", "gemini", "ollama", "together", "deepseek", "groq"],
+        choices=["anthropic", "gemini", "ollama", "together", "deepseek", "groq", "openai"],
         default=default_provider,
         help="The LLM provider to use (default: auto-detected or from TINYCODER_PROVIDER env var)",
     )
@@ -116,6 +116,12 @@ def main():
             model_str = f"groq-{model_name}"
         elif args.provider == "ollama":
             model_str = args.model or "qwen3:14b"
+        elif args.provider == "openai":
+            model_name = args.model or "o3-2025-01-24"
+            if not model_name.startswith("gpt-") and not model_name.startswith("o3-") and not model_name.startswith("o1-"):
+                model_str = f"openai-{model_name}"
+            else:
+                model_str = model_name
     
     # If no provider specified but model is, assume Ollama
     elif args.model:
