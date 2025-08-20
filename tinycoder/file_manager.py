@@ -131,7 +131,7 @@ class FileManager:
             create = self.io_input(
                 f"FILE: '{rel_path}' does not exist. Create it? (y/N): "
             )
-            if create.lower() == "y":
+            if create.startswith("y"):
                 if not self.create_file(abs_path):
                     return False
             else:

@@ -119,7 +119,7 @@ class CodeApplier:
                         self.logger.warning(f"Skipping creation of {COLORS['CYAN']}{rel_path}{RESET} due to 'skip all' decision.")
                     else:
                         confirm = await self.input_func(
-                            f"LLM wants to create new file '{COLORS['CYAN']}{rel_path}{RESET}'. Allow? (y/N/a[llow all]/s[kip all]): "
+                           f"LLM wants to create new file '{rel_path}'. Allow? (y/N/a[llow all]/s[kip all]): "
                         )
                         confirm = confirm.lower()
                         if confirm in ['y', 'yes', 'a', 'allow all']:
@@ -132,7 +132,7 @@ class CodeApplier:
                                 creation_decision = 'skip_all'
                 else: # File exists, but is not in context
                     confirm = await self.input_func(
-                        f"LLM wants to edit '{COLORS['CYAN']}{rel_path}{RESET}' which is not in the chat. Allow? (y/N): "
+                        f"LLM wants to edit '{rel_path}' which is not in the chat. Allow? (y/N): "
                     )
                     if confirm.lower() == 'y':
                         allow_edit = True

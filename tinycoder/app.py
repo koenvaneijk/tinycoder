@@ -631,7 +631,13 @@ class App:
         """Async user prompt for confirmations within the main app loop."""
         ring_bell()
         # Use prompt_async for async contexts
-        return await self.prompt_session.prompt_async(prompt_text)
+        response = await self.prompt_session.prompt_async(prompt_text)
+        # Strip any escape sequences and control characters
+        # This handles cases where Alt+Enter or other key combos add unwanted characters
+        import re
+        cleaned_response = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', response)
+        return cleaned_response.strip()
+
 
     def _get_bottom_toolbar_tokens(self) -> FormattedText:
         """

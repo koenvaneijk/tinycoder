@@ -106,7 +106,7 @@ class OpenAIClient(LLMClient):
 
         try:
             response = requests.post(
-                self.api_url, headers=self.headers, json=payload, timeout=180
+                self.api_url, headers=self.headers, json=payload, timeout=1000
             )
             
             response.raise_for_status()  # Check for HTTP errors
@@ -134,7 +134,7 @@ class OpenAIClient(LLMClient):
                 return None, f"OpenAI API Error: Unexpected response structure: {response_data}"
 
         except requests.Timeout:
-            return None, f"OpenAI API request timed out after 180 seconds."
+            return None, f"OpenAI API request timed out after 1000 seconds."
         except requests.HTTPError as e:
             error_msg = f"OpenAI API HTTP Error: {e.response.status_code} {e.response.reason} for URL {self.api_url}"
             try:
