@@ -7,6 +7,7 @@ from .ollama import OllamaClient, DEFAULT_OLLAMA_MODEL, DEFAULT_OLLAMA_HOST # Im
 from .anthropic import AnthropicClient # Import AnthropicClient
 from .together_ai import TogetherAIClient, DEFAULT_TOGETHER_MODEL # Import TogetherAIClient
 from .groq import GroqClient # Import GroqClient
+from .openai import OpenAIClient, DEFAULT_OPENAI_MODEL # Import OpenAIClient
 
 from typing import Optional
 
@@ -20,6 +21,7 @@ __all__ = [
     "AnthropicClient", # Add AnthropicClient to __all__
     "TogetherAIClient", # Add TogetherAIClient to __all__
     "GroqClient", # Add GroqClient to __all__
+    "OpenAIClient", # Add OpenAIClient to __all__
 ]
 
 logger = logging.getLogger(__name__)
@@ -89,6 +91,18 @@ def create_llm_client(model: Optional[str]) -> LLMClient:
             resolved_model_name = client.model
         except Exception as e:
             raise ValueError(f"Error initializing Groq client for model '{model}': {e}") from e
+    elif model and (model.startswith("openai-") or model.startswith("gpt-") or model.startswith("o3-") or model.startswith("o1-")):
+        logger.debug(f"Attempting to initialize OpenAI client with model: {model}")
+        try:
+            # Strip the "openai-" prefix if present, keep other prefixes as-is
+            if model.startswith("openai-"):
+                actual_model = model[len("openai-"):]
+            else:
+                actual_model = model
+            client = OpenAIClient(model=actual_model)
+            resolved_model_name = client.model
+        except Exception as e:
+            raise ValueError(f"Error initializing OpenAI client for model '{model}': {e}") from e
     else:
         # Assume Ollama for unknown/missing prefixes if not recognized
         logger.info(f"Unknown or missing prefix for model '{model}'. Assuming local Ollama model.")

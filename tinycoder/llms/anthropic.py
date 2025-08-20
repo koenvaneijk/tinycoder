@@ -11,10 +11,6 @@ ANTHROPIC_API_ENDPOINT = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_API_VERSION = "2023-06-01"
 ANTHROPIC_API_KEY_ENV_VAR = "ANTHROPIC_API_KEY"
 
-# Anthropic requires max_tokens. 4096 is a reasonable default upper limit.
-DEFAULT_MAX_TOKENS = 20000
-
-
 class AnthropicClient(LLMClient):
     """
     Client for interacting with the Anthropic Claude API.
@@ -100,12 +96,7 @@ class AnthropicClient(LLMClient):
         payload = {
             "model": self.model,
             "messages": formatted_messages,
-            "max_tokens": DEFAULT_MAX_TOKENS,
-            # Anthropic uses a top-level 'system' parameter
             "system": system_prompt if system_prompt else None,
-            # "stream": False, # Default is False for this endpoint
-            # Can add temperature, top_p etc. here if needed
-            # "temperature": 0.7,
         }
         # Remove system from payload if it's None or empty
         if not payload["system"]:

@@ -19,13 +19,13 @@ class EditParser:
         self.edit_tag_pattern = re.compile(
             r"<edit path=\"(.*?)\">([\s\S]*?)</edit>", re.DOTALL
         )
-        # Captures the content inside <old_code>
+        # Captures the content inside <find>
         self.old_code_pattern = re.compile(
-            r"<old_code>([\s\S]*?)</old_code>", re.DOTALL
+            r"<find>([\s\S]*?)</find>", re.DOTALL
         )
-        # Captures the content inside <new_code>
+        # Captures the content inside <replace>
         self.new_code_pattern = re.compile(
-            r"<new_code>([\s\S]*?)</new_code>", re.DOTALL
+            r"<replace>([\s\S]*?)</replace>", re.DOTALL
         )
         # Captures content inside <request_files>
         self.request_files_pattern = re.compile(
@@ -58,7 +58,7 @@ class EditParser:
                 )
                 continue  # Skip this edit block if path is empty
 
-            # Extract content from <old_code> and <new_code> within the <edit> tag's content
+            # Extract content from <find> and <replace> within the <edit> tag's content
             old_code = ""  # Initialize
             old_code_match = self.old_code_pattern.search(edit_tag_content)
             if old_code_match:
@@ -80,6 +80,23 @@ class EditParser:
                     new_code = new_code_content
                 else:
                     new_code = new_code_content.strip()
+            else:
+                # Workaround for common LLM mistake: using </find> instead of </replace>
+                # Check if there's a <replace> tag followed by </find>
+                malformed_replace_pattern = re.compile(
+                    r"<replace>([\s\S]*?)</find>", re.DOTALL
+                )
+                malformed_match = malformed_replace_pattern.search(edit_tag_content)
+                if malformed_match:
+                    self.logger.warning(
+                        f"Detected malformed <replace> block closed with </find> in edit for '{path_attr}'. "
+                        "Attempting to parse anyway."
+                    )
+                    new_code_content = malformed_match.group(1)
+                    if new_code_content.strip() == "":
+                        new_code = new_code_content
+                    else:
+                        new_code = new_code_content.strip()
             
             # Normalize line endings
             old_code = old_code.replace("\r\n", "\n")
@@ -89,7 +106,7 @@ class EditParser:
             # Skip edits that are effectively empty (both old and new code are empty *after stripping*)
             if old_code == "" and new_code == "":
                 self.logger.warning(
-                    f"Skipping edit for file '{path_attr}' because both <old_code> and <new_code> are effectively empty."
+                    f"Skipping edit for file '{path_attr}' because both <find> and <replace> are effectively empty."
                 )
                 continue
 
@@ -122,18 +139,18 @@ if __name__ == '__main__':
     response1 = """
 Some introductory text.
 <edit path="./path/to/file1.py">
-<old_code>
-print("hello old world")</old_code>
-<new_code>
-print("hello new world")</new_code>
+<find>
+print("hello old world")</find>
+<replace>
+print("hello new world")</replace>
 </edit>
 Some text in between.
 <edit path="another/file.txt">
-<old_code>old line1
-old line2</old_code>
-<new_code>new line1
+<find>old line1
+old line2</find>
+<replace>new line1
 new line2
-new line3</new_code>
+new line3</replace>
 </edit>
     """
     edits1 = parser.parse(response1)
@@ -145,8 +162,8 @@ new line3</new_code>
     # Test case 2: Empty path attribute
     response2 = """
 <edit path="">
-<old_code>foo</old_code>
-<new_code>bar</new_code>
+<find>foo</find>
+<replace>bar</replace>
 </edit>
     """
     edits2 = parser.parse(response2)
@@ -156,10 +173,10 @@ new line3</new_code>
     # Test case 3: Missing old_code or new_code tags
     response3 = """
 <edit path="file3.py">
-<old_code>only old</old_code>
+<find>only old</find>
 </edit>
 <edit path="file4.py">
-<new_code>only new</new_code>
+<replace>only new</replace>
 </edit>
     """
     edits3 = parser.parse(response3)
@@ -171,9 +188,9 @@ new line3</new_code>
     # Test case 4: Both old_code and new_code are empty (or contain only whitespace)
     response4 = """
 <edit path="file5.py">
-<old_code>
-</old_code>
-<new_code>   </new_code>
+<find>
+</find>
+<replace>   </replace>
 </edit>
     """
     edits4 = parser.parse(response4)
@@ -183,14 +200,14 @@ new line3</new_code>
     # Test case 5: Malformed XML (extra > in new_code closing tag, as per example)
     response5 = """
 <edit path="./path/to/file.py">
-<old_code>
+<find>
 A contiguous chunk of lines...
-</old_code>
-<new_code>
+</find>
+<replace>
 The lines to replace...
-</new_code>> 
+</replace>> 
 </edit>
-    """ # Note the `</new_code>>` - the regex should handle this gracefully.
+    """ # Note the `</replace>>` - the regex should handle this gracefully.
     edits5 = parser.parse(response5)
     print("Edits from response 5 (malformed new_code tag):")
     for edit in edits5:
@@ -206,8 +223,8 @@ The lines to replace...
     # Test case 7: Edit block with content but old/new tags are empty
     response7 = """
 <edit path="file7.py">
-<old_code></old_code>
-<new_code></new_code>
+<find></find>
+<replace></replace>
 </edit>
     """
     edits7 = parser.parse(response7)
@@ -217,8 +234,8 @@ The lines to replace...
     # Test case 8: Path with spaces (should be preserved by strip on attribute value, not content)
     response8 = """
 <edit path=" path with spaces/file.py ">
-<old_code>old</old_code>
-<new_code>new</new_code>
+<find>old</find>
+<replace>new</replace>
 </edit>
     """
     edits8 = parser.parse(response8)
