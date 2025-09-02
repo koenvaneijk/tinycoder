@@ -958,24 +958,11 @@ class RepoMap:
                 return ["  - (invalid or unreadable JSON)"]
             if not isinstance(data, dict):
                 return ["  - (non-object JSON)"]
-            lines: List[str] = []
+            # Only list top-level keys, up to 20; do not include any values
             keys = list(data.keys())
             if keys:
-                lines.append("  - keys: " + ", ".join(keys[:10]) + (" ..." if len(keys) > 10 else ""))
-            name = data.get("name")
-            if isinstance(name, str):
-                lines.append(f"  - name: {name!r}")
-            scripts = data.get("scripts")
-            if isinstance(scripts, dict):
-                s_keys = list(scripts.keys())
-                if s_keys:
-                    lines.append("  - scripts: " + ", ".join(s_keys[:10]) + (" ..." if len(s_keys) > 10 else ""))
-            for dep_key in ["dependencies", "devDependencies", "peerDependencies"]:
-                deps = data.get(dep_key)
-                if isinstance(deps, dict) and deps:
-                    d_keys = list(deps.keys())
-                    lines.append(f"  - {dep_key}: " + ", ".join(d_keys[:10]) + (" ..." if len(d_keys) > 10 else ""))
-            return lines or ["  - (no details)"]
+                return ["  - keys: " + ", ".join(keys[:20]) + (" ..." if len(keys) > 20 else "")]
+            return ["  - (no details)"]
 
         def _summarize_yaml(path: Path) -> List[str]:
             # very light line-based scan of top-level keys; detect docker-compose services
