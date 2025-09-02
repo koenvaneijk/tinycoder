@@ -958,11 +958,90 @@ class RepoMap:
                 return ["  - (invalid or unreadable JSON)"]
             if not isinstance(data, dict):
                 return ["  - (non-object JSON)"]
-            # Only list top-level keys, up to 20; do not include any values
+            
+            lines: List[str] = []
             keys = list(data.keys())
             if keys:
-                return ["  - keys: " + ", ".join(keys[:20]) + (" ..." if len(keys) > 20 else "")]
-            return ["  - (no details)"]
+                lines.append("  - keys: " + ", ".join(keys[:20]) + (" ..." if len(keys) > 20 else ""))
+            
+            # Helpers for structure-only schema (no values)
+            def _type_name(v: object) -> str:
+                if v is None:
+                    return "null"
+                if isinstance(v, bool):
+                    return "boolean"
+                # bool is a subclass of int; check bool before number
+                if isinstance(v, (int, float)) and not isinstance(v, bool):
+                    return "number"
+                if isinstance(v, str):
+                    return "string"
+                if isinstance(v, dict):
+                    return "object"
+                if isinstance(v, list):
+                    return "array"
+                return type(v).__name__
+            
+            def _summarize_object(d: Dict[str, object], subkey_cap: int = 8) -> str:
+                try:
+                    subkeys = list(d.keys())
+                except Exception:
+                    return "object"
+                if not subkeys:
+                    return "object{keys: }"
+                head = ", ".join(subkeys[:subkey_cap]) + (" ..." if len(subkeys) > subkey_cap else "")
+                return f"object{{keys: {head}}}"
+            
+            def _summarize_array(a: List[object], sample_cap: int = 50, subkey_cap: int = 8) -> str:
+                if not isinstance(a, list):
+                    return "array"
+                sample = a[:sample_cap]
+                if not sample:
+                    return "array<empty>"
+                kinds = Counter(_type_name(x) for x in sample)
+                if len(kinds) == 1:
+                    k = next(iter(kinds))
+                    if k == "object":
+                        union_keys: Set[str] = set()
+                        for x in sample:
+                            if isinstance(x, dict):
+                                union_keys.update(x.keys())
+                        union_list = sorted(list(union_keys))
+                        if union_list:
+                            preview = ", ".join(union_list[:subkey_cap]) + (" ..." if len(union_list) > subkey_cap else "")
+                            return f"array<object>{{keys: {preview}}}"
+                        return "array<object>"
+                    else:
+                        return f"array<{k}>"
+                else:
+                    total = sum(kinds.values())
+                    parts = []
+                    for k, c in kinds.most_common(3):
+                        pct = int(round(100 * c / total)) if total else 0
+                        parts.append(f"{k}({pct}%)")
+                    return "array<mixed: " + ", ".join(parts) + ">"
+            
+            def _summarize_top_value(v: object) -> str:
+                tn = _type_name(v)
+                if tn == "object":
+                    return _summarize_object(v)  # type: ignore[arg-type]
+                if tn == "array":
+                    return _summarize_array(v)   # type: ignore[arg-type]
+                return tn
+            
+            # Schema block: up to 8 top-level keys
+            if keys:
+                lines.append("  - schema:")
+                SCHEMA_CAP = 8
+                for k in keys[:SCHEMA_CAP]:
+                    try:
+                        desc = _summarize_top_value(data[k])
+                    except Exception:
+                        desc = "unknown"
+                    lines.append(f"    - {k}: {desc}")
+                if len(keys) > SCHEMA_CAP:
+                    lines.append("    - ...")
+            
+            return lines or ["  - (no details)"]
 
         def _summarize_yaml(path: Path) -> List[str]:
             # very light line-based scan of top-level keys; detect docker-compose services
