@@ -2,6 +2,7 @@ import ast
 import logging
 import json # Added for loading/saving exclusions
 from html.parser import HTMLParser
+from collections import Counter
 
 # Try importing unparse for argument formatting (Python 3.9+)
 try:
@@ -304,8 +305,129 @@ class RepoMap:
             self.logger.error(f"Error parsing HTML file {file_path}: {e}")
         return structure_lines
 
-    # --- Nested HTML Parser Class ---
-    # Using nested class to keep it contained within RepoMap
+    # --- Nested HTML Parser Classes ---
+    # Using nested classes to keep them contained within RepoMap
+
+    class _MiniHTMLSummary(HTMLParser):
+        """
+        Lightweight HTML summarizer focused on:
+        - Title and html[lang]
+        - Landmarks (header, nav, main, section, article, aside, footer)
+        - Headings: H1, first few H2
+        - Assets: stylesheets hrefs, scripts srcs, inline counts
+        - Hooks: first few IDs, duplicate IDs, top classes
+        - Framework hints via attributes/classes
+        - Forms: method, action, and first few inputs (type/name)
+        """
+        def __init__(self):
+            super().__init__(convert_charrefs=True)
+            self.in_title = False
+            self.title = ""
+            self.lang: Optional[str] = None
+
+            self.landmarks: Set[str] = set()
+            self.h1: Optional[str] = None
+            self.h2: List[str] = []
+
+            self.styles: List[str] = []
+            self.inline_style_count = 0
+            self.scripts: List[str] = []
+            self.inline_script_count = 0
+
+            self.ids: List[str] = []
+            self._id_seen: Set[str] = set()
+            self.dup_ids: Set[str] = set()
+            self.class_counter: Counter[str] = Counter()
+
+            self.forms: List[Dict[str, Union[str, List[Dict[str, str]]]]] = []
+            self._current_form: Optional[Dict[str, Union[str, List[Dict[str, str]]]]] = None
+
+            self.attr_flags: Dict[str, bool] = {"alpine": False, "htmx": False, "stimulus": False}
+
+        def handle_starttag(self, tag: str, attrs: List[Tuple[str, Optional[str]]]):
+            a = dict(attrs)
+            if tag == "html":
+                self.lang = a.get("lang") or self.lang
+
+            if tag in {"header", "nav", "main", "section", "article", "aside", "footer"}:
+                self.landmarks.add(tag)
+
+            if tag == "title":
+                self.in_title = True
+
+            if tag == "link":
+                rel = a.get("rel") or ""
+                if ("stylesheet" in rel) and ("href" in a):
+                    self.styles.append(a["href"])
+
+            if tag == "style":
+                self.inline_style_count += 1
+
+            if tag == "script":
+                src = a.get("src")
+                if src:
+                    self.scripts.append(src)
+                    if "htmx" in src:
+                        self.attr_flags["htmx"] = True
+                else:
+                    self.inline_script_count += 1
+
+            # IDs and duplicate detection
+            if "id" in a:
+                i = a["id"]
+                if i in self._id_seen:
+                    self.dup_ids.add(i)
+                else:
+                    self._id_seen.add(i)
+                    self.ids.append(i)
+
+            # Classes
+            cls = a.get("class")
+            if cls:
+                for c in cls.split():
+                    self.class_counter[c] += 1
+
+            # Framework attribute hints
+            if any(k.startswith("hx-") for k in a.keys()):
+                self.attr_flags["htmx"] = True
+            if any(k.startswith("x-") for k in a.keys()):
+                self.attr_flags["alpine"] = True
+            if "data-controller" in a:
+                self.attr_flags["stimulus"] = True
+
+            # Forms and inputs
+            if tag == "form":
+                self._current_form = {
+                    "method": (a.get("method", "GET") or "GET").upper(),
+                    "action": a.get("action", "") or "",
+                    "inputs": [],
+                }
+                self.forms.append(self._current_form)
+            if tag in {"input", "select", "textarea"} and self._current_form is not None:
+                self._current_form["inputs"].append({
+                    "type": a.get("type", tag) or tag,
+                    "name": a.get("name") or a.get("id") or ""
+                })
+
+        def handle_endtag(self, tag: str):
+            if tag == "title":
+                self.in_title = False
+            if tag == "form":
+                self._current_form = None
+
+        def handle_data(self, data: str):
+            text = data.strip()
+            if not text:
+                return
+            if self.in_title:
+                # accumulate title text
+                self.title += text
+            # Headings
+            if self.lasttag == "h1" and not self.h1:
+                self.h1 = text
+            elif self.lasttag == "h2":
+                self.h2.append(text)
+
     class _HTMLStructureParser(HTMLParser):
         def __init__(self, max_depth=5, max_lines=50):
             super().__init__()
@@ -627,10 +749,149 @@ class RepoMap:
                 content = path.read_text(encoding="utf-8", errors="replace")
             except Exception:
                 return ["  - (unreadable)"]
-            parser = self._HTMLStructureParser(max_depth=5, max_lines=HTML_CFG["max_lines_per_file"])
+
+            # Template detection via regex
+            TPL_EXTENDS = re.search(r'{%\\s*extends\\s+["\\']([^"\\']+)["\\']\\s*%}', content)
+            TPL_INCLUDES = re.findall(r'{%\\s*include\\s+["\\']([^"\\']+)["\\']\\s*%}', content)
+            TPL_BLOCKS = re.findall(r'{%\\s*block\\s+([a-zA-Z0-9_]+)\\s*%}', content)
+            HAS_INTERP = bool(re.search(r'{{.*?}}', content, re.S))
+
+            # Parse HTML structure
+            parser = self._MiniHTMLSummary()
             parser.feed(content)
-            structure = parser.get_structure()
-            return [f"  - {line}" for line in structure]
+
+            def trunc(s: str, max_len: int = 80) -> str:
+                if s is None:
+                    return ""
+                s = str(s)
+                return s if len(s) <= max_len else s[: max_len - 3] + "..."
+
+            def detect_frameworks(class_counter: Counter, attr_flags: Dict[str, bool], scripts: List[str]) -> List[str]:
+                frameworks = set()
+                # Tailwind: utility-like classes or breakpoints
+                if any(
+                    c.startswith(("text-", "bg-", "mt-", "mb-", "ml-", "mr-", "px-", "py-", "grid", "flex"))
+                    or ":" in c
+                    for c in class_counter
+                ):
+                    frameworks.add("Tailwind")
+                # Bootstrap
+                if any(c.startswith(("container", "row", "col-")) for c in class_counter):
+                    frameworks.add("Bootstrap")
+                # Foundation
+                if "grid-x" in class_counter or "cell" in class_counter:
+                    frameworks.add("Foundation")
+                # Alpine.js / HTMX / Stimulus
+                if attr_flags.get("alpine"):
+                    frameworks.add("Alpine")
+                if attr_flags.get("htmx") or any("htmx" in (s or "") for s in scripts):
+                    frameworks.add("HTMX")
+                if attr_flags.get("stimulus"):
+                    frameworks.add("Stimulus")
+                return sorted(frameworks)
+
+            lines: List[str] = []
+
+            # Line: Title and lang
+            title = parser.title.strip() if parser.title else ""
+            lang = parser.lang or ""
+            if title or lang:
+                segs = []
+                if title:
+                    segs.append(f'Title: "{trunc(title)}"')
+                if lang:
+                    segs.append(f"lang={lang}")
+                lines.append("  - " + ", ".join(segs))
+
+            # Line: Landmarks
+            if parser.landmarks:
+                order = ["header", "nav", "main", "section", "article", "aside", "footer"]
+                lm = [t for t in order if t in parser.landmarks]
+                if lm:
+                    lines.append("  - Landmarks: " + ", ".join(lm))
+
+            # Line: Headings
+            h_parts = []
+            if parser.h1:
+                h_parts.append(f'H1 "{trunc(parser.h1)}"')
+            if parser.h2:
+                h2_list = [f'"{trunc(t)}"' for t in parser.h2[:5]]
+                h_parts.append(f"H2[{min(len(parser.h2),5)}]: " + ", ".join(h2_list))
+            if h_parts:
+                lines.append("  - Headings: " + "; ".join(h_parts))
+
+            # Line: Styles
+            if parser.styles or parser.inline_style_count:
+                styles_list = [trunc(href) for href in parser.styles[:5]]
+                style_seg = f"Styles({len(styles_list)}): " + ", ".join(styles_list) if styles_list else "Styles(0)"
+                style_seg += f"; inline:{parser.inline_style_count}"
+                lines.append("  - " + style_seg)
+
+            # Line: Scripts
+            if parser.scripts or parser.inline_script_count:
+                scripts_list = [trunc(src) for src in parser.scripts[:5]]
+                script_seg = f"Scripts({len(scripts_list)}): " + ", ".join(scripts_list) if scripts_list else "Scripts(0)"
+                script_seg += f"; inline:{parser.inline_script_count}"
+                lines.append("  - " + script_seg)
+
+            # Line: Hooks (IDs and Classes)
+            ids = parser.ids[:5]
+            classes_top = parser.class_counter.most_common(5)
+            parts = []
+            if ids:
+                parts.append("IDs[" + str(len(ids)) + "]: " + ", ".join(f"#{i}" for i in ids))
+            if parser.dup_ids:
+                dups = list(parser.dup_ids)[:3]
+                parts.append("Duplicates: " + ", ".join(f"#{d}" for d in dups))
+            if classes_top:
+                parts.append(
+                    "Classes top5: " + ", ".join(f"{name}({count})" for name, count in classes_top)
+                )
+            if parts:
+                lines.append("  - Hooks: " + "; ".join(parts))
+
+            # Line: Frameworks
+            frameworks = detect_frameworks(parser.class_counter, parser.attr_flags, parser.scripts)
+            if frameworks:
+                lines.append("  - Frameworks: " + ", ".join(frameworks))
+
+            # Line: Templates
+            tpl_parts = []
+            if TPL_EXTENDS:
+                tpl_parts.append(f'extends {TPL_EXTENDS.group(1)}')
+            if TPL_INCLUDES:
+                inc = ", ".join(TPL_INCLUDES[:5]) + (" ..." if len(TPL_INCLUDES) > 5 else "")
+                tpl_parts.append(f"includes: {inc}")
+            if TPL_BLOCKS:
+                blk = ", ".join(TPL_BLOCKS[:5]) + (" ..." if len(TPL_BLOCKS) > 5 else "")
+                tpl_parts.append(f"blocks: {blk}")
+            if not tpl_parts and HAS_INTERP:
+                tpl_parts.append("{{ … }} present")
+            if tpl_parts:
+                lines.append("  - Templates: " + "; ".join(tpl_parts))
+
+            # Line: Forms (compact)
+            if parser.forms:
+                form_summaries: List[str] = []
+                for f in parser.forms[:2]:
+                    method = f.get("method", "GET")
+                    action = trunc(f.get("action", ""))
+                    inputs = f.get("inputs", [])  # type: ignore
+                    inp_parts = []
+                    for inp in inputs[:5]:
+                        t = inp.get("type", "")
+                        n = inp.get("name", "")
+                        if n:
+                            inp_parts.append(f"{n}[{t}]")
+                        else:
+                            inp_parts.append(f"[{t}]")
+                    form_summaries.append(f"{method} {action} inputs: " + ", ".join(inp_parts))
+                lines.append(f"  - Forms({len(parser.forms)}): " + " | ".join(form_summaries))
+
+            # Fall back if nothing captured
+            if not lines:
+                lines.append("  - (no summary)")
+            return lines
 
         def _summarize_css(path: Path) -> List[str]:
             try:
