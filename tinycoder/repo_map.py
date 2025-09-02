@@ -751,9 +751,9 @@ class RepoMap:
                 return ["  - (unreadable)"]
 
             # Template detection via regex
-            TPL_EXTENDS = re.search(r'{%\\s*extends\\s+["\\']([^"\\']+)["\\']\\s*%}', content)
-            TPL_INCLUDES = re.findall(r'{%\\s*include\\s+["\\']([^"\\']+)["\\']\\s*%}', content)
-            TPL_BLOCKS = re.findall(r'{%\\s*block\\s+([a-zA-Z0-9_]+)\\s*%}', content)
+            TPL_EXTENDS = re.search(r'{%\s*extends\s+["\']([^"\']+)["\']\s*%}', content)
+            TPL_INCLUDES = re.findall(r'{%\s*include\s+["\']([^"\']+)["\']\s*%}', content)
+            TPL_BLOCKS = re.findall(r'{%\s*block\s+([a-zA-Z0-9_]+)\s*%}', content)
             HAS_INTERP = bool(re.search(r'{{.*?}}', content, re.S))
 
             # Parse HTML structure
