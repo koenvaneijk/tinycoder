@@ -415,22 +415,428 @@ class RepoMap:
             # Handle potential errors during parsing if needed, though base class handles some
 
     def generate_map(self, chat_files_rel: Set[str]) -> str:
-        """Generates the repository map string for Python files."""
+        """
+        Generates a repository map that focuses on files likely to be edited.
+        - Always includes Python (current behavior preserved).
+        - Adds compact sections for HTML, CSS, JS/TS, JSON, YAML, Dockerfiles, Markdown, and TOML.
+        - Applies strict per-section caps and aggregation to handle very large directories (e.g., thousands of HTML files).
+        """
+        import re
+        from collections import defaultdict
+
+        # Sections container
         map_sections: Dict[str, List[str]] = {
             "Python Files": [],
-            # Add more sections later (e.g., "CSS Files")
+            "HTML Files": [],
+            "JS/TS Files": [],
+            "CSS Files": [],
+            "JSON Files": [],
+            "YAML Files": [],
+            "Dockerfiles": [],
+            "Markdown Files": [],
+            "TOML Files": [],
         }
-        processed_py_files = 0
-        # processed_html_files = 0 # Removed HTML counter
 
-        # --- Process Python Files ---
-        for file_path in self.get_py_files():
+        # Global limits (approximate line budget, final global cap applied later)
+        MAX_MAP_LINES = 1000
+
+        # Per-section budgets and behavior
+        LARGE_FILE_BYTES = 256 * 1024
+
+        HTML_CFG = dict(max_files=60, max_lines_per_file=12, section_max_lines=200, dir_threshold=20, sample_per_dir=3)
+        JS_CFG   = dict(max_files=50, max_lines_per_file=10, section_max_lines=150, dir_threshold=30, sample_per_dir=3)
+        CSS_CFG  = dict(max_files=40, max_lines_per_file=8,  section_max_lines=100, dir_threshold=30, sample_per_dir=3)
+        JSON_CFG = dict(max_files=20, max_lines_per_file=10, section_max_lines=80,  dir_threshold=50, sample_per_dir=2)
+        YAML_CFG = dict(max_files=15, max_lines_per_file=8,  section_max_lines=80,  dir_threshold=30, sample_per_dir=2)
+        DOCKER_CFG = dict(max_files=5, max_lines_per_file=10, section_max_lines=50, dir_threshold=10, sample_per_dir=1)
+        MD_CFG   = dict(max_files=10, max_lines_per_file=8,  section_max_lines=60,  dir_threshold=50, sample_per_dir=2)
+        TOML_CFG = dict(max_files=10, max_lines_per_file=8,  section_max_lines=60,  dir_threshold=50, sample_per_dir=2)
+
+        # Preferred directories to prioritize per type
+        HTML_PREF_DIRS = ["templates", "resources/views", "public", "static"]
+        JS_PREF_DIRS   = ["src", "static", "assets", "public"]
+        CSS_PREF_DIRS  = ["src", "static", "assets", "public"]
+        JSON_PREF_DIRS = ["", "config"]
+        YAML_PREF_DIRS = ["", "deploy", "docker", ".github/workflows"]
+        MD_PREF_DIRS   = ["docs"]
+        TOML_PREF_DIRS = ["", "config"]
+
+        # Normalize chat file set to strings as-is (already relative in most cases)
+        chat_rel = set(chat_files_rel or set())
+
+        # Helper: get relative path string
+        def _rel(path: Path) -> str:
             try:
-                rel_path_str = str(file_path.relative_to(self.root))
-            except ValueError:
-                rel_path_str = str(file_path)  # Keep absolute if not relative
+                return str(path.relative_to(self.root))
+            except Exception:
+                return str(path)
 
-            if rel_path_str in chat_files_rel:
+        # Helper: user/builtin exclusions
+        def _is_included(path: Path) -> bool:
+            if any(part in self.exclude_dirs for part in path.parts):
+                return False
+            try:
+                rel_path = path.relative_to(self.root)
+                if self._is_path_excluded_by_user_config(rel_path):
+                    return False
+            except ValueError:
+                return False
+            return path.is_file()
+
+        # Helper: discovery by glob patterns
+        def _discover(patterns: List[str]) -> List[Path]:
+            seen = set()
+            results: List[Path] = []
+            for pat in patterns:
+                for p in self.root.rglob(pat):
+                    if p in seen:
+                        continue
+                    seen.add(p)
+                    if _is_included(p):
+                        results.append(p)
+            return results
+
+        # Helper: priority key
+        def _priority_key(path: Path, pref_dirs: List[str]) -> tuple:
+            rel = _rel(path)
+            pref = 1
+            for d in pref_dirs:
+                if not d:
+                    continue
+                if rel.startswith(d + "/") or f"/{d}/" in rel or rel.endswith("/" + d) or rel == d:
+                    pref = 0
+                    break
+            try:
+                mtime = -path.stat().st_mtime
+            except Exception:
+                mtime = 0
+            return (pref, mtime, rel)
+
+        # Helper: render a single file with summarizer and per-section caps.
+        def _render_file(path: Path, summarize_fn, cfg: Dict[str, int], section_lines: List[str], used_counts: Dict[str, int]) -> None:
+            if used_counts["files"] >= cfg["max_files"]:
+                return
+            if used_counts["lines"] >= cfg["section_max_lines"]:
+                return
+
+            rel = _rel(path)
+            # Skip files already in chat
+            if rel in chat_rel:
+                return
+
+            # Append file header
+            section_lines.append(f"\n`{rel}`:")
+            used_counts["lines"] += 1
+
+            # Large file shortcut
+            try:
+                size = path.stat().st_size
+            except Exception:
+                size = 0
+            if size > LARGE_FILE_BYTES:
+                if used_counts["lines"] < cfg["section_max_lines"]:
+                    section_lines.append("  - (skipped large file)")
+                    used_counts["lines"] += 1
+                    used_counts["files"] += 1
+                return
+
+            # Summarize details
+            try:
+                details = summarize_fn(path)
+            except Exception as e:
+                self.logger.debug(f"Summarizer error for {rel}: {e}")
+                details = ["  - (error parsing file)"]
+
+            # Limit per-file lines and remaining section budget
+            remaining = cfg["section_max_lines"] - used_counts["lines"]
+            if remaining <= 0:
+                return
+            for line in details[: min(cfg["max_lines_per_file"], remaining)]:
+                section_lines.append(line)
+                used_counts["lines"] += 1
+                if used_counts["lines"] >= cfg["section_max_lines"]:
+                    break
+
+            used_counts["files"] += 1
+
+        # Helper: build a section with aggregation by directory
+        def _build_section(files: List[Path], summarize_fn, cfg: Dict[str, int], pref_dirs: List[str], skip_fn=None) -> List[str]:
+            if not files:
+                return []
+
+            # Filter out chat files early and skipped patterns
+            filtered = []
+            for p in files:
+                rel = _rel(p)
+                if rel in chat_rel:
+                    continue
+                if skip_fn and skip_fn(p):
+                    continue
+                filtered.append(p)
+            if not filtered:
+                return []
+
+            # Sort by priority
+            filtered.sort(key=lambda p: _priority_key(p, pref_dirs))
+
+            # Group by directory
+            groups: Dict[str, List[Path]] = defaultdict(list)
+            for p in filtered:
+                try:
+                    drel = str(p.parent.relative_to(self.root))
+                except Exception:
+                    drel = str(p.parent)
+                groups[drel].append(p)
+
+            # Sort directories by best priority of their files
+            dirs_sorted = sorted(groups.keys(), key=lambda d: _priority_key(groups[d][0], pref_dirs))
+
+            section_lines: List[str] = []
+            used_counts = {"files": 0, "lines": 0}
+
+            for d in dirs_sorted:
+                if used_counts["files"] >= cfg["max_files"] or used_counts["lines"] >= cfg["section_max_lines"]:
+                    break
+                files_in_dir = groups[d]
+                if len(files_in_dir) > cfg["dir_threshold"]:
+                    # Render a few samples
+                    for p in files_in_dir[: cfg["sample_per_dir"]]:
+                        _render_file(p, summarize_fn, cfg, section_lines, used_counts)
+                        if used_counts["files"] >= cfg["max_files"] or used_counts["lines"] >= cfg["section_max_lines"]:
+                            break
+                    if used_counts["lines"] < cfg["section_max_lines"]:
+                        omitted = len(files_in_dir) - min(cfg["sample_per_dir"], len(files_in_dir))
+                        section_lines.append(f"  - {d or '.'}/: {omitted} files (omitted)")
+                        used_counts["lines"] += 1
+                else:
+                    for p in files_in_dir:
+                        if used_counts["files"] >= cfg["max_files"] or used_counts["lines"] >= cfg["section_max_lines"]:
+                            break
+                        _render_file(p, summarize_fn, cfg, section_lines, used_counts)
+
+            # If we truncated by file cap, append a truncation notice
+            total_candidates = len(filtered)
+            if used_counts["files"] < total_candidates and used_counts["lines"] < cfg["section_max_lines"]:
+                omitted_total = total_candidates - used_counts["files"]
+                section_lines.append(f"  - ... (section truncated; {omitted_total} files omitted)")
+            return section_lines
+
+        # Summarizers (cheap, dependency-free)
+        def _summarize_html(path: Path) -> List[str]:
+            try:
+                content = path.read_text(encoding="utf-8", errors="replace")
+            except Exception:
+                return ["  - (unreadable)"]
+            parser = self._HTMLStructureParser(max_depth=5, max_lines=HTML_CFG["max_lines_per_file"])
+            parser.feed(content)
+            structure = parser.get_structure()
+            return [f"  - {line}" for line in structure]
+
+        def _summarize_css(path: Path) -> List[str]:
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except Exception:
+                return ["  - (unreadable)"]
+            # Remove comments
+            while "/*" in text and "*/" in text:
+                s = text.find("/*")
+                e = text.find("*/", s + 2)
+                if e == -1:
+                    break
+                text = text[:s] + text[e + 2 :]
+            rules = 0
+            media = text.count("@media")
+            imports = text.count("@import")
+            lines = []
+            for part in text.split("}"):
+                if "{" not in part:
+                    continue
+                selector = part.split("{", 1)[0].strip()
+                if selector:
+                    rules += 1
+                    if len(lines) < 10:
+                        lines.append(f"  - {selector}")
+            prefix = [f"  - rules={rules}, @media={media}, @import={imports}"]
+            return prefix + lines
+
+        def _summarize_js(path: Path) -> List[str]:
+            try:
+                content = path.read_text(encoding="utf-8", errors="replace")
+            except Exception:
+                return ["  - (unreadable)"]
+            funcs = re.findall(r"\\bfunction\\s+(\\w+)\\s*\\(", content)
+            classes = re.findall(r"\\bclass\\s+(\\w+)\\b", content)
+            exp_funcs = re.findall(r"\\bexport\\s+(?:default\\s+)?function\\s+(\\w+)", content)
+            exp_classes = re.findall(r"\\bexport\\s+(?:default\\s+)?class\\s+(\\w+)", content)
+            imports = re.findall(r"\\bimport\\b[^\\n]*?from\\s*[\\'\\\"]([^\\'\\\"]+)[\\'\\\"]", content)
+            out: List[str] = []
+            if funcs:
+                s = ", ".join(funcs[:10]) + (" ..." if len(funcs) > 10 else "")
+                out.append(f"  - functions: {s}")
+            if classes:
+                s = ", ".join(classes[:10]) + (" ..." if len(classes) > 10 else "")
+                out.append(f"  - classes: {s}")
+            if exp_funcs:
+                s = ", ".join(exp_funcs[:10]) + (" ..." if len(exp_funcs) > 10 else "")
+                out.append(f"  - exported functions: {s}")
+            if exp_classes:
+                s = ", ".join(exp_classes[:10]) + (" ..." if len(exp_classes) > 10 else "")
+                out.append(f"  - exported classes: {s}")
+            if imports:
+                s = ", ".join(imports[:10]) + (" ..." if len(imports) > 10 else "")
+                out.append(f"  - imports: {s}")
+            if not out:
+                out.append("  - (no top-level outline found)")
+            return out
+
+        def _summarize_json(path: Path) -> List[str]:
+            try:
+                raw = path.read_text(encoding="utf-8", errors="replace")
+                data = json.loads(raw)
+            except Exception:
+                return ["  - (invalid or unreadable JSON)"]
+            if not isinstance(data, dict):
+                return ["  - (non-object JSON)"]
+            lines: List[str] = []
+            keys = list(data.keys())
+            if keys:
+                lines.append("  - keys: " + ", ".join(keys[:10]) + (" ..." if len(keys) > 10 else ""))
+            name = data.get("name")
+            if isinstance(name, str):
+                lines.append(f"  - name: {name!r}")
+            scripts = data.get("scripts")
+            if isinstance(scripts, dict):
+                s_keys = list(scripts.keys())
+                if s_keys:
+                    lines.append("  - scripts: " + ", ".join(s_keys[:10]) + (" ..." if len(s_keys) > 10 else ""))
+            for dep_key in ["dependencies", "devDependencies", "peerDependencies"]:
+                deps = data.get(dep_key)
+                if isinstance(deps, dict) and deps:
+                    d_keys = list(deps.keys())
+                    lines.append(f"  - {dep_key}: " + ", ".join(d_keys[:10]) + (" ..." if len(d_keys) > 10 else ""))
+            return lines or ["  - (no details)"]
+
+        def _summarize_yaml(path: Path) -> List[str]:
+            # very light line-based scan of top-level keys; detect docker-compose services
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except Exception:
+                return ["  - (unreadable)"]
+            lines: List[str] = []
+            top_keys = []
+            for ln in text.splitlines():
+                if not ln.strip() or ln.lstrip().startswith("#"):
+                    continue
+                if ln == ln.lstrip() and ":" in ln:
+                    key = ln.split(":", 1)[0].strip().strip('"').strip("'")
+                    if key and key not in top_keys:
+                        top_keys.append(key)
+                if len(top_keys) >= 12:
+                    break
+            if top_keys:
+                lines.append("  - keys: " + ", ".join(top_keys[:12]) + (" ..." if len(top_keys) > 12 else ""))
+
+            if "docker-compose" in path.name or "compose" in path.name:
+                # attempt to list services under 'services:'
+                services: List[str] = []
+                in_services = False
+                base_indent = None
+                for ln in text.splitlines():
+                    if ln.strip().startswith("#"):
+                        continue
+                    if not in_services and ln.strip().startswith("services:"):
+                        in_services = True
+                        base_indent = len(ln) - len(ln.lstrip())
+                        continue
+                    if in_services:
+                        if ln.strip() == "":
+                            continue
+                        indent = len(ln) - len(ln.lstrip())
+                        if indent <= (base_indent or 0):
+                            break
+                        if ":" in ln:
+                            svc = ln.split(":", 1)[0].strip()
+                            if svc and svc not in services and not svc.startswith("#"):
+                                services.append(svc)
+                        if len(services) >= 12:
+                            break
+                if services:
+                    lines.append("  - services: " + ", ".join(services[:12]) + (" ..." if len(services) > 12 else ""))
+            return lines or ["  - (no details)"]
+
+        def _summarize_dockerfile(path: Path) -> List[str]:
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except Exception:
+                return ["  - (unreadable)"]
+            lines: List[str] = []
+            for ln in text.splitlines():
+                s = ln.strip()
+                if not s or s.startswith("#"):
+                    continue
+                up = s.upper()
+                if any(up.startswith(k) for k in ["FROM", "WORKDIR", "COPY", "ADD", "EXPOSE", "CMD", "ENTRYPOINT"]):
+                    # Keep argument portion short
+                    lines.append("  - " + s[:200])
+                if len(lines) >= 10:
+                    break
+            return lines or ["  - (no details)"]
+
+        def _summarize_md(path: Path) -> List[str]:
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except Exception:
+                return ["  - (unreadable)"]
+            lines: List[str] = []
+            for ln in text.splitlines():
+                if ln.startswith("#"):
+                    # normalize to at most 3 levels for brevity
+                    hashes = len(ln) - len(ln.lstrip("#"))
+                    title = ln.strip("#").strip()
+                    lines.append(f"  - {'#' * min(hashes, 3)} {title}")
+                if len(lines) >= 10:
+                    break
+            return lines or ["  - (no headings)"]
+
+        def _summarize_toml(path: Path) -> List[str]:
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except Exception:
+                return ["  - (unreadable)"]
+            lines: List[str] = []
+            tables: List[str] = []
+            for ln in text.splitlines():
+                s = ln.strip()
+                if not s or s.startswith("#"):
+                    continue
+                if s.startswith("[") and s.endswith("]"):
+                    t = s.strip("[]").strip()
+                    if t and t not in tables:
+                        tables.append(t)
+                        if len(tables) >= 10:
+                            break
+            if tables:
+                lines.append("  - tables: " + ", ".join(tables))
+            # small special-case for pyproject.toml
+            if path.name == "pyproject.toml":
+                for ln in text.splitlines():
+                    if ln.strip().startswith("name") and "=" in ln:
+                        lines.append("  - " + ln.strip()[:200])
+                        break
+            return lines or ["  - (no details)"]
+
+        # Skip helpers
+        def _skip_js_css_minified(path: Path) -> bool:
+            n = path.name.lower()
+            return n.endswith(".min.js") or n.endswith(".min.css")
+
+        # ------------------------
+        # Process Python Files (existing behavior)
+        # ------------------------
+        processed_py_files = 0
+        for file_path in self.get_py_files():
+            rel_path_str = _rel(file_path)
+            if rel_path_str in chat_rel:
                 continue  # Skip files already in chat
 
             is_test_file = file_path.name.startswith("test_") and file_path.name.endswith(".py")
@@ -442,32 +848,25 @@ class RepoMap:
 
             if all_file_definitions and all_file_definitions[0][0] == "Module":
                 module_entry = all_file_definitions[0]
-                if len(module_entry) > 3 and module_entry[3]: # Check if docstring exists
+                if len(module_entry) > 3 and module_entry[3]:  # Check if docstring exists
                     module_docstring_line_str = f" # {module_entry[3]}"
                 definitions_to_process_further = all_file_definitions[1:]
-            
+
             file_path_display_line = f"\n`{rel_path_str}`:{module_docstring_line_str}"
 
             if is_test_file:
                 file_path_display_line += " # (Test file, further details omitted)"
                 current_file_map_lines_for_this_file.append(file_path_display_line)
-                # No further processing of definitions or imports for test files
             else:
-                # If it's NOT a test file, and there's no module docstring AND no other definitions, skip it.
                 if not module_docstring_line_str and not definitions_to_process_further:
-                    continue 
-
+                    continue
                 current_file_map_lines_for_this_file.append(file_path_display_line)
 
-                # Sort remaining top-level items (functions, classes) by line number
                 definitions_to_process_further.sort(key=lambda x: x[2])
 
                 for definition in definitions_to_process_further:
                     kind = definition[0]
                     name = definition[1]
-                    # Function: (kind, name, lineno, args_str, docstring_first_line)
-                    # Class:    (kind, name, lineno, docstring_first_line, methods)
-                    
                     docstring_display_str = ""
                     if kind == "Function":
                         args_str = definition[3]
@@ -477,84 +876,126 @@ class RepoMap:
                         current_file_map_lines_for_this_file.append(f"  - def {name}({args_str}){docstring_display_str}")
                     elif kind == "Class":
                         class_docstring_first_line = definition[3]
-                        methods = definition[4] # List of method tuples
+                        methods = definition[4]
                         if class_docstring_first_line:
                             docstring_display_str = f" # {class_docstring_first_line}"
                         current_file_map_lines_for_this_file.append(f"  - class {name}{docstring_display_str}")
-                        
-                        # Methods list contains: ("Method", name, lineno, args_str, docstring_first_line)
                         for method_tuple in methods:
                             method_name = method_tuple[1]
                             method_args_str = method_tuple[3]
                             method_docstring_first_line = method_tuple[4]
-                            
-                            method_doc_str = ""
-                            if method_docstring_first_line:
-                                method_doc_str = f" # {method_docstring_first_line}"
-                            current_file_map_lines_for_this_file.append(
-                                f"    - def {method_name}({method_args_str}){method_doc_str}"
-                            )
+                            method_doc_str = f" # {method_docstring_first_line}" if method_docstring_first_line else ""
+                            current_file_map_lines_for_this_file.append(f"    - def {method_name}({method_args_str}){method_doc_str}")
 
-                # --- Add Local Import Information for non-test files ---
+                # Local import information
                 local_imports = []
                 try:
-                    # Pass self.root as the project_root for relative path calculation
-                    local_imports = find_local_imports_with_entities(
-                        file_path, project_root=str(self.root)
-                    )
+                    local_imports = find_local_imports_with_entities(file_path, project_root=str(self.root))
                 except Exception as e:
-                    self.logger.warning(
-                        f"Warning: Could not analyze local imports for {rel_path_str}: {e}",
-                    )
+                    self.logger.warning(f"Warning: Could not analyze local imports for {rel_path_str}: {e}")
 
                 if local_imports:
                     current_file_map_lines_for_this_file.append("  - Imports:")
                     for imp_statement in local_imports:
                         current_file_map_lines_for_this_file.append(f"    - {imp_statement}")
-                # --- End Local Import Information ---
-            
-            # If any lines were generated for this file, add them to the main map section
+
             if current_file_map_lines_for_this_file:
                 map_sections["Python Files"].extend(current_file_map_lines_for_this_file)
                 processed_py_files += 1
 
-        # --- HTML Files Processing Removed ---
-        # The entire block for processing HTML files has been removed.
+        # ------------------------
+        # Process HTML, JS/TS, CSS, JSON, YAML, Dockerfiles, Markdown, TOML
+        # ------------------------
+        # HTML files (reuse existing get_html_files)
+        html_files = list(self.get_html_files())
+        map_sections["HTML Files"] = _build_section(
+            html_files, _summarize_html, HTML_CFG, HTML_PREF_DIRS, skip_fn=None
+        )
+
+        # JS/TS files
+        js_files = _discover(["*.js", "*.jsx", "*.ts", "*.tsx"])
+        map_sections["JS/TS Files"] = _build_section(
+            js_files, _summarize_js, JS_CFG, JS_PREF_DIRS, skip_fn=_skip_js_css_minified
+        )
+
+        # CSS files
+        css_files = _discover(["*.css", "*.scss"])
+        map_sections["CSS Files"] = _build_section(
+            css_files, _summarize_css, CSS_CFG, CSS_PREF_DIRS, skip_fn=_skip_js_css_minified
+        )
+
+        # JSON files (prioritize package.json naturally due to name sorting)
+        json_files = _discover(["*.json"])
+        map_sections["JSON Files"] = _build_section(
+            json_files, _summarize_json, JSON_CFG, JSON_PREF_DIRS, skip_fn=None
+        )
+
+        # YAML files
+        yaml_files = _discover(["*.yml", "*.yaml"])
+        map_sections["YAML Files"] = _build_section(
+            yaml_files, _summarize_yaml, YAML_CFG, YAML_PREF_DIRS, skip_fn=None
+        )
+
+        # Dockerfiles (common naming)
+        docker_files = _discover(["Dockerfile", "dockerfile", "Dockerfile.*", "dockerfile.*"])
+        map_sections["Dockerfiles"] = _build_section(
+            docker_files, _summarize_dockerfile, DOCKER_CFG, ["", "docker"], skip_fn=None
+        )
+
+        # Markdown files
+        md_files = _discover(["*.md", "*.markdown", "*.MD"])
+        map_sections["Markdown Files"] = _build_section(
+            md_files, _summarize_md, MD_CFG, MD_PREF_DIRS, skip_fn=None
+        )
+
+        # TOML files
+        toml_files = _discover(["*.toml"])
+        map_sections["TOML Files"] = _build_section(
+            toml_files, _summarize_toml, TOML_CFG, TOML_PREF_DIRS, skip_fn=None
+        )
 
         # --- Combine Sections ---
         final_map_lines = []
         total_lines = 0
-        # Basic token limiting (very approximate)
-        # TODO: Implement a more accurate token counter if needed
-        MAX_MAP_LINES = 1000  # Limit the number of lines in the map
 
-        # Add header only if there's content
-        if processed_py_files > 0: # Condition updated to only check Python files
-            final_map_lines.append("\nRepository Map (other files):")
-        else:
-            # If no Python files were found or processed, return empty string
+        # Add header only if there's content anywhere
+        has_any_content = any(len(lines) > 0 for lines in map_sections.values())
+        if not has_any_content:
             return ""
 
-        for section_name, section_lines in map_sections.items():
+        final_map_lines.append("\nRepository Map (other files):")
+
+        for section_name in [
+            "Python Files",
+            "HTML Files",
+            "JS/TS Files",
+            "CSS Files",
+            "JSON Files",
+            "YAML Files",
+            "Dockerfiles",
+            "Markdown Files",
+            "TOML Files",
+        ]:
+            section_lines = map_sections.get(section_name, [])
             if not section_lines:
                 continue
 
-            # Add section header only if it has content
             section_header = f"\n--- {section_name} ---"
             if total_lines + 1 < MAX_MAP_LINES:
                 final_map_lines.append(section_header)
                 total_lines += 1
             else:
-                break  # Stop adding sections if map limit is reached
+                break
 
             for line in section_lines:
                 if total_lines < MAX_MAP_LINES:
                     final_map_lines.append(line)
                     total_lines += 1
                 else:
-                    break  # Stop adding lines within a section if map limit is reached
+                    break
+
             if total_lines >= MAX_MAP_LINES:
-                break  # Stop processing sections
+                break
 
         if total_lines >= MAX_MAP_LINES:
             final_map_lines.append("\n... (repository map truncated)")
