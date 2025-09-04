@@ -128,7 +128,7 @@ class App:
             self.logger.warning(
                 f"Git is available, but no .git directory found starting from {Path.cwd()}."
             )
-            response = prompt_user_input("Initialize a new Git repository here? (y/N): ")
+            response = prompt_user_input(f"{FmtColors['YELLOW']}Initialize a new Git repository here? (y/N): {RESET}")
 
             if response.lower() == 'y':
                 initialized = self.git_manager.initialize_repo()
@@ -315,8 +315,8 @@ class App:
     def toggle_repo_map(self, state: bool) -> None:
         """Sets the state for including the repo map in prompts."""
         self.include_repo_map = state
-        status = "enabled" if state else "disabled"
-        self.logger.info(f"Repository map inclusion in prompts is now {status}.")
+        status_str = f"{FmtColors['GREEN']}enabled{RESET}" if state else f"{FmtColors['YELLOW']}disabled{RESET}"
+        self.logger.info(f"Repository map inclusion in prompts is now {status_str}.")
 
     def _get_current_repo_map_string(self) -> str:
         """Generates and returns the current repository map string."""
@@ -344,7 +344,7 @@ class App:
             last_user_message = next((msg['content'] for msg in reversed(history) if msg['role'] == 'user' and msg['content'] and not msg['content'].startswith("(placeholder)")), None)
             if last_user_message:
                 instruction = last_user_message
-                self.logger.info("Suggesting files based on the last user message in history.")
+                self.logger.info(f"{FmtColors['BLUE']}Suggesting files based on the last user message in history.{RESET}")
             else:
                 self.logger.warning("No custom instruction provided and no suitable user history found to base suggestions on.")
                 return
@@ -358,12 +358,12 @@ class App:
         if suggested_files:
             self.logger.info("LLM suggested the following files (relative to project root):")
             for i, fname in enumerate(suggested_files):
-                self.logger.info(f"  {i+1}. {fname}")
+                self.logger.info(f"  {i+1}. {FmtColors['CYAN']}{fname}{RESET}")
 
-            confirm_prompt = "Add files to context? (y/N, or list indices like '1,3'): "
+            confirm_prompt = f"{FmtColors['YELLOW']}Add files to context? (y/N, or list indices like '1,3'): {RESET}"
             confirm = prompt_user_input(confirm_prompt).strip().lower()
             if not confirm: # User cancelled
-                self.logger.info("\nFile addition cancelled by user.")
+                self.logger.info(f"{FmtColors['YELLOW']}\nFile addition cancelled by user.{RESET}")
                 return
 
             files_to_add = []
@@ -521,19 +521,20 @@ class App:
                     if not self.docker_manager.has_live_reload(service_name):
                         services_to_volume_restart_only.add(service_name)
                     else:
-                        self.logger.info(f"Service '{service_name}' affected by volume change and has live-reload, no automatic restart needed.")
+                        self.logger.info(f"Service '{STYLES['BOLD']}{FmtColors['CYAN']}{service_name}{RESET}' affected by volume change and has live-reload, no automatic restart needed.")
                 else:
                     self.logger.debug(f"Service '{service_name}' affected by volume change but not running, skipping restart.")
         
         if services_to_build_and_restart:
             sorted_build_services = sorted(list(services_to_build_and_restart))
+            colored_services = [f"{STYLES['BOLD']}{FmtColors['YELLOW']}{s}{RESET}" for s in sorted_build_services]
             self.logger.warning(
-                f"Services requiring build & restart: {', '.join(sorted_build_services)}"
+                f"Services requiring build & restart: {', '.join(colored_services)}"
             )
             if non_interactive:
                 self.logger.info("Non-interactive mode: Skipping build & restart prompt. Please manage manually.")
             else:
-                prompt = f"Rebuild and restart affected services ({', '.join(sorted_build_services)}) now? (y/N): "
+                prompt = f"{FmtColors['YELLOW']}Rebuild and restart affected services ({', '.join(sorted_build_services)}) now? (y/N): {RESET}"
                 confirm = prompt_user_input(prompt).strip().lower()
 
                 if not confirm:  # User cancelled the prompt
@@ -551,8 +552,9 @@ class App:
         # Handle services that only needed a volume-based restart (and weren't built)
         if services_to_volume_restart_only:
             sorted_volume_services = sorted(list(services_to_volume_restart_only))
+            colored_services = [f"{STYLES['BOLD']}{FmtColors['CYAN']}{s}{RESET}" for s in sorted_volume_services]
             self.logger.info(
-                f"Services requiring restart due to volume changes (no live-reload): {', '.join(sorted_volume_services)}"
+                f"Services requiring restart due to volume changes (no live-reload): {', '.join(colored_services)}"
             )
             if non_interactive:
                 self.logger.info("Non-interactive mode: Skipping volume-based restart. Please manage manually.")
@@ -562,7 +564,7 @@ class App:
                     # confirm_restart = input(f"Restart services ({', '.join(sorted_volume_services)}) now? (y/N): ").strip().lower()
                     # if confirm_restart == 'y':
                     for service in sorted_volume_services:
-                        self.logger.info(f"Service '{service}' is running without apparent live-reload and affected by volume change.")
+                        self.logger.info(f"Service '{STYLES['BOLD']}{FmtColors['CYAN']}{service}{RESET}' is running without apparent live-reload and affected by volume change.")
                         self.docker_manager.restart_service(service)
                 except (EOFError, KeyboardInterrupt):
                     self.logger.info("\nVolume restart cancelled by user.")
@@ -879,7 +881,7 @@ class App:
                              If None, commits changes to all files currently in the FileManager context.
         """
         if not self.git_manager.is_repo(): # is_repo() also implicitly checks if git is available
-            self.logger.info("Not in a git repository or Git is unavailable, skipping commit.")
+            self.logger.warning("Not in a git repository or Git is unavailable, skipping commit.")
             return
 
         files_to_commit_abs = []
@@ -940,7 +942,7 @@ class App:
             return
 
         if last_hash not in self.coder_commits:
-            self.logger.error(f"Last commit {last_hash} was not made by {APP_NAME}.")
+            self.logger.error(f"Last commit {FmtColors['YELLOW']}{last_hash}{RESET} was not made by {STYLES['BOLD']}{APP_NAME}{RESET}.")
             self.logger.info("You can manually undo with 'git reset HEAD~1'")
             return
 
@@ -964,7 +966,7 @@ class App:
         if not requested_files_from_llm:
             return False
 
-        self.logger.info(f"{STYLES['BOLD']}LLM requested additional file context.{RESET}")
+        self.logger.info(f"{STYLES['BOLD']}{FmtColors['BLUE']}LLM requested additional file context:{RESET}")
         
         valid_files_to_potentially_add = []
         non_existent_files_requested = []
@@ -1011,11 +1013,11 @@ class App:
         for i, fname in enumerate(valid_files_to_potentially_add):
             self.logger.info(f"  {i+1}. {FmtColors['CYAN']}{fname}{RESET}")
         
-        confirm_prompt = "Add these files to context? (y/N, or list indices like '1,3'): "
+        confirm_prompt = f"{FmtColors['YELLOW']}Add these files to context? (y/N, or list indices like '1,3'): {RESET}"
         confirm = (await self._prompt_for_confirmation(confirm_prompt)).strip().lower()
 
         if not confirm: # Handles cancellation from prompt_user_input
-            self.logger.info("\nFile addition (from LLM request) cancelled by user.")
+            self.logger.info(f"{FmtColors['YELLOW']}\nFile addition (from LLM request) cancelled by user.{RESET}")
             self.reflected_message = "User cancelled the addition of requested files. Please advise on how to proceed or if you can continue without them."
             return True
 
@@ -1155,10 +1157,11 @@ class App:
                             self.logger.info("Edits processed, but no files were changed.")
                     elif failed_indices:
                         failed_indices_str = ", ".join(map(str, sorted(failed_indices)))
+                        colored_indices = f"{STYLES['BOLD']}{FmtColors['RED']}{failed_indices_str}{RESET}"
                         error_message = (
                             f"Some edits failed to apply. No changes have been committed.\n"
                             f"Please review and provide corrected edit blocks for the failed edits.\n\n"
-                            f"Failed edit block numbers (1-based): {failed_indices_str}\n\n"
+                            f"Failed edit block numbers (1-based): {colored_indices}\n\n"
                             f"Successfully applied edits (if any) have modified the files in memory, "
                             f"but you should provide corrections for the failed ones before proceeding."
                         )
@@ -1177,7 +1180,7 @@ class App:
                     combined_errors = "\n".join(error_messages)
                     self.logger.error(combined_errors)
 
-                    fix_lint = await self._prompt_for_confirmation("Attempt to fix lint errors? (y/N): ")
+                    fix_lint = await self._prompt_for_confirmation(f"{FmtColors['YELLOW']}Attempt to fix lint errors? (y/N): {RESET}")
                     if fix_lint.lower() == "y":
                         self.reflected_message = combined_errors
             
@@ -1185,7 +1188,7 @@ class App:
 
     def _ask_llm_for_files(self, instruction: str) -> List[str]:
         """Asks the LLM to identify files needed for a given instruction."""
-        self.logger.info("Asking LLM to identify relevant files...")
+        self.logger.info(f"{FmtColors['BLUE']}Asking LLM to identify relevant files...{RESET}")
 
         # Use PromptBuilder to build the identify files prompt, passing repo map state
         system_prompt = self.prompt_builder.build_identify_files_prompt(
