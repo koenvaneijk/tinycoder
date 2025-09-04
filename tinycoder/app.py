@@ -31,7 +31,6 @@ from tinycoder.input_preprocessor import InputPreprocessor
 from tinycoder.ui.console_interface import ring_bell, prompt_user_input
 from tinycoder.ui.command_completer import PTKCommandCompleter
 from tinycoder.ui.log_formatter import ColorLogFormatter, STYLES, COLORS as FmtColors, RESET
-from tinycoder.ui.spinner import Spinner
 from tinycoder.docker_manager import DockerManager
 
 COMMIT_PREFIX = "🤖 tinycoder: "
@@ -45,7 +44,6 @@ class App:
         self.verbose = verbose
         self._setup_logging()
         self._init_llm_client(model)
-        self._init_spinner()
         self._setup_git()
         self._init_core_managers(continue_chat)
         self._setup_docker() # Initialize Docker manager
@@ -113,11 +111,6 @@ class App:
             print("Please check model name or API key environment variables.", file=sys.stderr)
             sys.exit(1)
 
-    def _init_spinner(self) -> None:
-        """Initializes the console spinner."""
-        self.spinner = Spinner("💭 Thinking...")
-        self.logger.debug("Spinner initialized.")
-
     def _setup_git(self) -> None:
         """Initializes GitManager, checks for Git, finds root, and optionally initializes a repo."""
         self.git_manager = GitManager()
@@ -135,7 +128,7 @@ class App:
             self.logger.warning(
                 f"Git is available, but no .git directory found starting from {Path.cwd()}."
             )
-            response = prompt_user_input("Initialize a new Git repository here? (y/N): ")
+            response = prompt_user_input(f"{FmtColors['YELLOW']}Initialize a new Git repository here? (y/N): {RESET}")
 
             if response.lower() == 'y':
                 initialized = self.git_manager.initialize_repo()
@@ -322,8 +315,8 @@ class App:
     def toggle_repo_map(self, state: bool) -> None:
         """Sets the state for including the repo map in prompts."""
         self.include_repo_map = state
-        status = "enabled" if state else "disabled"
-        self.logger.info(f"Repository map inclusion in prompts is now {status}.")
+        status_str = f"{FmtColors['GREEN']}enabled{RESET}" if state else f"{FmtColors['YELLOW']}disabled{RESET}"
+        self.logger.info(f"Repository map inclusion in prompts is now {status_str}.")
 
     def _get_current_repo_map_string(self) -> str:
         """Generates and returns the current repository map string."""
@@ -351,7 +344,7 @@ class App:
             last_user_message = next((msg['content'] for msg in reversed(history) if msg['role'] == 'user' and msg['content'] and not msg['content'].startswith("(placeholder)")), None)
             if last_user_message:
                 instruction = last_user_message
-                self.logger.info("Suggesting files based on the last user message in history.")
+                self.logger.info(f"{FmtColors['BLUE']}Suggesting files based on the last user message in history.{RESET}")
             else:
                 self.logger.warning("No custom instruction provided and no suitable user history found to base suggestions on.")
                 return
@@ -365,12 +358,12 @@ class App:
         if suggested_files:
             self.logger.info("LLM suggested the following files (relative to project root):")
             for i, fname in enumerate(suggested_files):
-                self.logger.info(f"  {i+1}. {fname}")
+                self.logger.info(f"  {i+1}. {FmtColors['CYAN']}{fname}{RESET}")
 
-            confirm_prompt = "Add files to context? (y/N, or list indices like '1,3'): "
+            confirm_prompt = f"{FmtColors['YELLOW']}Add files to context? (y/N, or list indices like '1,3'): {RESET}"
             confirm = prompt_user_input(confirm_prompt).strip().lower()
             if not confirm: # User cancelled
-                self.logger.info("\nFile addition cancelled by user.")
+                self.logger.info(f"{FmtColors['YELLOW']}\nFile addition cancelled by user.{RESET}")
                 return
 
             files_to_add = []
@@ -396,11 +389,12 @@ class App:
                         "tool",
                         f"Added {added_count} file(s) to context from LLM suggestion: {', '.join(successfully_added_fnames)}"
                     )
-                    self.logger.info(f"Added {added_count} file(s) to context: {', '.join(successfully_added_fnames)}")
+                    colored_fnames = [f"{FmtColors['CYAN']}{f}{RESET}" for f in successfully_added_fnames]
+                    self.logger.debug(f"Added {added_count} file(s) to context: {', '.join(colored_fnames)}")
             else:
-                self.logger.info("No suggested files were added to the context.")
+                self.logger.debug("No suggested files were added to the context.")
         elif instruction: # _ask_llm_for_files was called but returned no files
-            self.logger.info("LLM did not suggest any files based on the provided instruction.")
+            self.logger.debug("LLM did not suggest any files based on the provided instruction.")
         # If instruction was empty, it's logged before calling _ask_llm_for_files
 
 
@@ -527,19 +521,20 @@ class App:
                     if not self.docker_manager.has_live_reload(service_name):
                         services_to_volume_restart_only.add(service_name)
                     else:
-                        self.logger.info(f"Service '{service_name}' affected by volume change and has live-reload, no automatic restart needed.")
+                        self.logger.info(f"Service '{STYLES['BOLD']}{FmtColors['CYAN']}{service_name}{RESET}' affected by volume change and has live-reload, no automatic restart needed.")
                 else:
                     self.logger.debug(f"Service '{service_name}' affected by volume change but not running, skipping restart.")
         
         if services_to_build_and_restart:
             sorted_build_services = sorted(list(services_to_build_and_restart))
+            colored_services = [f"{STYLES['BOLD']}{FmtColors['YELLOW']}{s}{RESET}" for s in sorted_build_services]
             self.logger.warning(
-                f"Services requiring build & restart: {', '.join(sorted_build_services)}"
+                f"Services requiring build & restart: {', '.join(colored_services)}"
             )
             if non_interactive:
                 self.logger.info("Non-interactive mode: Skipping build & restart prompt. Please manage manually.")
             else:
-                prompt = f"Rebuild and restart affected services ({', '.join(sorted_build_services)}) now? (y/N): "
+                prompt = f"{FmtColors['YELLOW']}Rebuild and restart affected services ({', '.join(sorted_build_services)}) now? (y/N): {RESET}"
                 confirm = prompt_user_input(prompt).strip().lower()
 
                 if not confirm:  # User cancelled the prompt
@@ -557,8 +552,9 @@ class App:
         # Handle services that only needed a volume-based restart (and weren't built)
         if services_to_volume_restart_only:
             sorted_volume_services = sorted(list(services_to_volume_restart_only))
+            colored_services = [f"{STYLES['BOLD']}{FmtColors['CYAN']}{s}{RESET}" for s in sorted_volume_services]
             self.logger.info(
-                f"Services requiring restart due to volume changes (no live-reload): {', '.join(sorted_volume_services)}"
+                f"Services requiring restart due to volume changes (no live-reload): {', '.join(colored_services)}"
             )
             if non_interactive:
                 self.logger.info("Non-interactive mode: Skipping volume-based restart. Please manage manually.")
@@ -568,7 +564,7 @@ class App:
                     # confirm_restart = input(f"Restart services ({', '.join(sorted_volume_services)}) now? (y/N): ").strip().lower()
                     # if confirm_restart == 'y':
                     for service in sorted_volume_services:
-                        self.logger.info(f"Service '{service}' is running without apparent live-reload and affected by volume change.")
+                        self.logger.info(f"Service '{STYLES['BOLD']}{FmtColors['CYAN']}{service}{RESET}' is running without apparent live-reload and affected by volume change.")
                         self.docker_manager.restart_service(service)
                 except (EOFError, KeyboardInterrupt):
                     self.logger.info("\nVolume restart cancelled by user.")
@@ -610,12 +606,12 @@ class App:
         """Adds initial files specified via command line arguments."""
         if files:
             colored_files = [f"{FmtColors['CYAN']}{f}{RESET}" for f in files]
-            self.logger.info(f"Adding initial files to context: {', '.join(colored_files)}")
+            self.logger.debug(f"Adding initial files to context: {', '.join(colored_files)}")
             added_count = 0
             for fname in files:
                 if self.file_manager.add_file(fname):
                     added_count += 1
-            self.logger.info(f"Successfully added {added_count} initial file(s).")
+            self.logger.debug(f"Successfully added {added_count} initial file(s).")
         else:
             self.logger.debug("No initial files specified.")
 
@@ -792,13 +788,45 @@ class App:
             
             self.logger.debug(f"Approx. input tokens to send: {input_tokens}")
 
-            self.spinner.start()
-            try:
-                response_content, error_message = self.client.generate_content(
-                    system_prompt=system_prompt_text, history=history_to_send
-                )
-            finally:
-                self.spinner.stop()
+            response_content = None
+            error_message = None
+
+            # Check for streaming capability
+            if hasattr(self.client, 'generate_content_stream'):
+                assistant_header = [('class:assistant.header', 'ASSISTANT'), ('', ':\n')]
+                print_formatted_text(FormattedText(assistant_header), style=self.style)
+                
+                full_response_chunks = []
+                try:
+                    stream = self.client.generate_content_stream(
+                        system_prompt=system_prompt_text, history=history_to_send
+                    )
+                    for chunk in stream:
+                        if "STREAMING_ERROR:" in chunk:
+                            error_message = chunk.replace("STREAMING_ERROR:", "").strip()
+                            break
+                        
+                        # Use print_formatted_text to be safe with prompt_toolkit rendering
+                        print_formatted_text(chunk, end='')
+                        sys.stdout.flush() # Ensure chunks are displayed immediately
+                        full_response_chunks.append(chunk)
+                    
+                    print() # Newline after the full response
+                    if not error_message:
+                        response_content = "".join(full_response_chunks)
+
+                except Exception as e:
+                    self.logger.error(f"Error while streaming from LLM: {e}", exc_info=True)
+                    error_message = f"An unexpected error occurred during streaming: {e}"
+            
+            else: # Fallback to original non-streaming behavior, but without spinner
+                try:
+                    response_content, error_message = self.client.generate_content(
+                        system_prompt=system_prompt_text, history=history_to_send
+                    )
+                except Exception as e:
+                    self.logger.error(f"Error calling LLM: {e}", exc_info=True)
+                    error_message = f"An unexpected error occurred during LLM API call: {e}"
 
             # --- Handle response ---
             if error_message:
@@ -807,24 +835,26 @@ class App:
                 )
                 return None
             elif response_content is None:
-                # Should be covered by error_message, but handle defensively
-                self.logger.error(
-                    f"LLM API ({self.client.__class__.__name__}) returned no content and no error message.",
+                self.logger.warning(
+                    f"LLM API ({self.client.__class__.__name__}) returned no content.",
                 )
                 return None
             else:
-                assistant_header = [('class:assistant.header', 'ASSISTANT'), ('', ':\n')]
-                print_formatted_text(FormattedText(assistant_header), style=self.style)
+                # For non-streaming, we need to print the response here.
+                # For streaming, it was already printed chunk-by-chunk.
+                if not hasattr(self.client, 'generate_content_stream'):
+                    assistant_header = [('class:assistant.header', 'ASSISTANT'), ('', ':\n')]
+                    print_formatted_text(FormattedText(assistant_header), style=self.style)
 
-                # Format for display if in ask mode and not an edit block
-                if self.mode == "ask" and response_content and not response_content.strip().startswith("<"):
-                    display_response_tuples = self._format_markdown_for_terminal(response_content)
-                    print_formatted_text(FormattedText(display_response_tuples), style=self.style)
-                else:
-                    # Print raw content, but use prompt_toolkit to handle potential long lines
-                    print_formatted_text(response_content)
-                
-                print() # Add a final newline for spacing
+                    # Format for display if in ask mode and not an edit block
+                    if self.mode == "ask" and response_content and not response_content.strip().startswith("<"):
+                        display_response_tuples = self._format_markdown_for_terminal(response_content)
+                        print_formatted_text(FormattedText(display_response_tuples), style=self.style)
+                    else:
+                        # Print raw content, but use prompt_toolkit to handle potential long lines
+                        print_formatted_text(response_content)
+                    
+                    print() # Add a final newline for spacing
 
                 output_chars = len(response_content)
                 output_tokens = round(output_chars / 4) # Based on raw response
@@ -851,7 +881,7 @@ class App:
                              If None, commits changes to all files currently in the FileManager context.
         """
         if not self.git_manager.is_repo(): # is_repo() also implicitly checks if git is available
-            self.logger.info("Not in a git repository or Git is unavailable, skipping commit.")
+            self.logger.warning("Not in a git repository or Git is unavailable, skipping commit.")
             return
 
         files_to_commit_abs = []
@@ -912,7 +942,7 @@ class App:
             return
 
         if last_hash not in self.coder_commits:
-            self.logger.error(f"Last commit {last_hash} was not made by {APP_NAME}.")
+            self.logger.error(f"Last commit {FmtColors['YELLOW']}{last_hash}{RESET} was not made by {STYLES['BOLD']}{APP_NAME}{RESET}.")
             self.logger.info("You can manually undo with 'git reset HEAD~1'")
             return
 
@@ -936,7 +966,7 @@ class App:
         if not requested_files_from_llm:
             return False
 
-        self.logger.info(f"{STYLES['BOLD']}LLM requested additional file context.{RESET}")
+        self.logger.info(f"{STYLES['BOLD']}{FmtColors['BLUE']}LLM requested additional file context:{RESET}")
         
         valid_files_to_potentially_add = []
         non_existent_files_requested = []
@@ -976,18 +1006,18 @@ class App:
             else:
                  # Info/warnings about non-existent or already-in-context files have been printed.
                  # If there are no *new* files to add, we can inform.
-                 self.logger.info("No new, existing files to add from LLM's request.")
+                 self.logger.debug("No new, existing files to add from LLM's request.")
             return False
 
         self.logger.info(f"{FmtColors['BLUE']}LLM suggests adding these existing files to context:{RESET}")
         for i, fname in enumerate(valid_files_to_potentially_add):
             self.logger.info(f"  {i+1}. {FmtColors['CYAN']}{fname}{RESET}")
         
-        confirm_prompt = "Add these files to context? (y/N, or list indices like '1,3'): "
+        confirm_prompt = f"{FmtColors['YELLOW']}Add these files to context? (y/N, or list indices like '1,3'): {RESET}"
         confirm = (await self._prompt_for_confirmation(confirm_prompt)).strip().lower()
 
         if not confirm: # Handles cancellation from prompt_user_input
-            self.logger.info("\nFile addition (from LLM request) cancelled by user.")
+            self.logger.info(f"{FmtColors['YELLOW']}\nFile addition (from LLM request) cancelled by user.{RESET}")
             self.reflected_message = "User cancelled the addition of requested files. Please advise on how to proceed or if you can continue without them."
             return True
 
@@ -1022,7 +1052,7 @@ class App:
             else:
                 self.logger.info("No files were ultimately added from LLM's request despite confirmation.")
         else: 
-            self.logger.info("User chose not to add files requested by LLM, or selection was invalid.")
+            self.logger.debug("User chose not to add files requested by LLM, or selection was invalid.")
             self.reflected_message = "User declined to add the requested files. Please advise on how to proceed or if you can continue without them."
             return True
 
@@ -1119,7 +1149,7 @@ class App:
 
                     if all_succeeded:
                         if modified_files:
-                            self.logger.info("All edits applied successfully.")
+                            self.logger.debug("All edits applied successfully.")
                             # Automate Docker actions before committing
                             self._handle_docker_automation(list(modified_files), non_interactive=non_interactive)
                             self._git_add_commit(list(modified_files))
@@ -1127,10 +1157,11 @@ class App:
                             self.logger.info("Edits processed, but no files were changed.")
                     elif failed_indices:
                         failed_indices_str = ", ".join(map(str, sorted(failed_indices)))
+                        colored_indices = f"{STYLES['BOLD']}{FmtColors['RED']}{failed_indices_str}{RESET}"
                         error_message = (
                             f"Some edits failed to apply. No changes have been committed.\n"
                             f"Please review and provide corrected edit blocks for the failed edits.\n\n"
-                            f"Failed edit block numbers (1-based): {failed_indices_str}\n\n"
+                            f"Failed edit block numbers (1-based): {colored_indices}\n\n"
                             f"Successfully applied edits (if any) have modified the files in memory, "
                             f"but you should provide corrections for the failed ones before proceeding."
                         )
@@ -1138,7 +1169,7 @@ class App:
                         self.reflected_message = error_message 
                     
                 else:  # No edits found by parser (and no file requests were actioned to cause reflection)
-                    self.logger.info("No actionable edit blocks found in the response.")
+                    self.logger.debug("No actionable edit blocks found in the response.")
 
                 # --- Check for Lint Errors (related to edits) ---
                 # Only trigger lint reflection if no other more critical reflection (like edit failure) is already set.
@@ -1149,7 +1180,7 @@ class App:
                     combined_errors = "\n".join(error_messages)
                     self.logger.error(combined_errors)
 
-                    fix_lint = await self._prompt_for_confirmation("Attempt to fix lint errors? (y/N): ")
+                    fix_lint = await self._prompt_for_confirmation(f"{FmtColors['YELLOW']}Attempt to fix lint errors? (y/N): {RESET}")
                     if fix_lint.lower() == "y":
                         self.reflected_message = combined_errors
             
@@ -1157,7 +1188,7 @@ class App:
 
     def _ask_llm_for_files(self, instruction: str) -> List[str]:
         """Asks the LLM to identify files needed for a given instruction."""
-        self.logger.info("Asking LLM to identify relevant files...")
+        self.logger.info(f"{FmtColors['BLUE']}Asking LLM to identify relevant files...{RESET}")
 
         # Use PromptBuilder to build the identify files prompt, passing repo map state
         system_prompt = self.prompt_builder.build_identify_files_prompt(
@@ -1165,17 +1196,13 @@ class App:
         )
 
         history_for_files = [{"role": "user", "content": instruction}]
-        self.spinner.start()
         try:
             response_content, error_message = self.client.generate_content(
                 system_prompt=system_prompt, history=history_for_files
             )
         except KeyboardInterrupt:
             self.logger.info("\nLLM file suggestion cancelled.")
-            # The finally block will handle stopping the spinner.
             return []  # Return empty list on cancellation
-        finally:
-            self.spinner.stop()
 
         if error_message:
             self.logger.error(f"Error asking LLM for files: {error_message}")
@@ -1201,7 +1228,7 @@ class App:
                 existing_files.append(fname)
             else:
                 self.logger.warning(
-                    f"Ignoring non-existent file suggested by LLM: {FmtColors['CYAN']}{fname}{RESET}"
+                    f"Ignoring non-existent file suggested by LLM: {FmtColors['RED']}{fname}{RESET}"
                 )
         
         if existing_files:
@@ -1310,7 +1337,7 @@ class App:
 
         # --- Check if we need to ask LLM for files (code mode, no files yet) ---
         if self.mode == "code" and not self.file_manager.get_files():
-            self.logger.info("No files in context for 'code' mode.")
+            self.logger.info(f"No files in context for {STYLES['BOLD']}{FmtColors['GREEN']}CODE{RESET} mode.")
             suggested_files = self._ask_llm_for_files(message)
             added_files_count = 0
             if suggested_files:
@@ -1380,7 +1407,7 @@ class App:
         while True:
             try:
                 # 1. Build the prompt message
-                mode_str = self.mode
+                mode_str = self.mode.upper() # Use uppercase for consistency
                 prompt_message = FormattedText([
                     ('class:prompt.mode', f'({mode_str})'),
                     ('class:prompt.separator', ' > '),

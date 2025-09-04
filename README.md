@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <strong>Your command-line AI coding assistant 🤖 integrated with Git! Pure Python, minimal dependencies.</strong>
+  <strong>Your command-line AI coding assistant 🤖 integrated with Git! Pure Python, zero dependencies.</strong>
 </p>
 
 TinyCoder is a Python-based tool designed to help you interact with Large Language Models (LLMs) for coding tasks directly within your terminal. It analyzes your codebase, builds context for the LLM, applies suggested code changes safely, and integrates seamlessly with your Git workflow. Minimal dependencies, maximum productivity!

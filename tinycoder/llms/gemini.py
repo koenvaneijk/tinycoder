@@ -2,9 +2,9 @@ import os
 import tinycoder.requests as requests
 import json
 import sys
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Iterator
 from tinycoder.llms.base import LLMClient 
-DEFAULT_GEMINI_MODEL = "gemini-2.5-pro"
+DEFAULT_GEMINI_MODEL = "gemini-1.5-pro-latest"
 API_ENDPOINT = "generateContent"
 
 class GeminiClient(LLMClient):
@@ -116,3 +116,65 @@ class GeminiClient(LLMClient):
             return None, error_msg
         except Exception as e:
             return None, f"An unexpected error occurred during Gemini API call: {e}"
+
+    def generate_content_stream(
+        self, system_prompt: str, history: List[Dict[str, str]]
+    ) -> Iterator[str]:
+        """
+        Generates content from the Gemini API using a streaming connection.
+        This method is a generator, yielding text chunks as they are received.
+        """
+        # Use the streaming endpoint with Server-Sent Events (SSE) for easier parsing
+        stream_api_url = self.api_url.replace(f":{API_ENDPOINT}", ":streamGenerateContent") + "?alt=sse"
+        
+        formatted_history = self._format_history(history)
+
+        payload = {
+            "contents": formatted_history,
+            "systemInstruction": {"parts": [{"text": system_prompt}]},
+            "generationConfig": {
+                "responseMimeType": "text/plain",
+                "temperature": 0.7,
+            },
+        }
+
+        headers = {
+            "Content-Type": "application/json",
+            "x-goog-api-key": self._api_key
+        }
+
+        response = None
+        try:
+            response = requests.post(stream_api_url, headers=headers, json=payload, stream=True, timeout=180)
+            response.raise_for_status()
+            for line in response.iter_lines():
+                if line:
+                    decoded_line = line.decode('utf-8')
+                    if decoded_line.startswith('data: '):
+                        json_str = decoded_line[6:]
+                        try:
+                            data = json.loads(json_str)
+                            if "candidates" in data and data["candidates"]:
+                                candidate = data["candidates"][0]
+                                if "content" in candidate and "parts" in candidate["content"]:
+                                    for part in candidate["content"]["parts"]:
+                                        if "text" in part:
+                                            yield part["text"]
+                        except json.JSONDecodeError:
+                            # In SSE, there can be other message types or partial data.
+                            # For this implementation, we silently ignore parsing errors.
+                            continue
+        except requests.RequestException as e:
+            error_msg = f"Gemini API Request Error: {e}"
+            if e.response is not None:
+                try:
+                    error_details = e.response.json()
+                    error_msg += f"\nDetails: {json.dumps(error_details)}"
+                except json.JSONDecodeError:
+                    error_msg += f"\nResponse Body (non-JSON): {e.response.text}"
+            yield f"STREAMING_ERROR: {error_msg}"
+        except Exception as e:
+            yield f"STREAMING_ERROR: An unexpected error occurred during Gemini API stream: {e}"
+        finally:
+            if response:
+                response.close()
