@@ -1225,7 +1225,7 @@ class App:
                 existing_files.append(fname)
             else:
                 self.logger.warning(
-                    f"Ignoring non-existent file suggested by LLM: {FmtColors['CYAN']}{fname}{RESET}"
+                    f"Ignoring non-existent file suggested by LLM: {FmtColors['RED']}{fname}{RESET}"
                 )
         
         if existing_files:
@@ -1334,7 +1334,7 @@ class App:
 
         # --- Check if we need to ask LLM for files (code mode, no files yet) ---
         if self.mode == "code" and not self.file_manager.get_files():
-            self.logger.info("No files in context for 'code' mode.")
+            self.logger.info(f"No files in context for {STYLES['BOLD']}{FmtColors['GREEN']}CODE{RESET} mode.")
             suggested_files = self._ask_llm_for_files(message)
             added_files_count = 0
             if suggested_files:
@@ -1404,7 +1404,7 @@ class App:
         while True:
             try:
                 # 1. Build the prompt message
-                mode_str = self.mode
+                mode_str = self.mode.upper() # Use uppercase for consistency
                 prompt_message = FormattedText([
                     ('class:prompt.mode', f'({mode_str})'),
                     ('class:prompt.separator', ' > '),
