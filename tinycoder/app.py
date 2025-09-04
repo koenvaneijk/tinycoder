@@ -389,7 +389,8 @@ class App:
                         "tool",
                         f"Added {added_count} file(s) to context from LLM suggestion: {', '.join(successfully_added_fnames)}"
                     )
-                    self.logger.info(f"Added {added_count} file(s) to context: {', '.join(successfully_added_fnames)}")
+                    colored_fnames = [f"{FmtColors['CYAN']}{f}{RESET}" for f in successfully_added_fnames]
+                    self.logger.debug(f"Added {added_count} file(s) to context: {', '.join(colored_fnames)}")
             else:
                 self.logger.debug("No suggested files were added to the context.")
         elif instruction: # _ask_llm_for_files was called but returned no files
@@ -603,12 +604,12 @@ class App:
         """Adds initial files specified via command line arguments."""
         if files:
             colored_files = [f"{FmtColors['CYAN']}{f}{RESET}" for f in files]
-            self.logger.info(f"Adding initial files to context: {', '.join(colored_files)}")
+            self.logger.debug(f"Adding initial files to context: {', '.join(colored_files)}")
             added_count = 0
             for fname in files:
                 if self.file_manager.add_file(fname):
                     added_count += 1
-            self.logger.info(f"Successfully added {added_count} initial file(s).")
+            self.logger.debug(f"Successfully added {added_count} initial file(s).")
         else:
             self.logger.debug("No initial files specified.")
 
