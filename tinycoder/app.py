@@ -31,7 +31,6 @@ from tinycoder.input_preprocessor import InputPreprocessor
 from tinycoder.ui.console_interface import ring_bell, prompt_user_input
 from tinycoder.ui.command_completer import PTKCommandCompleter
 from tinycoder.ui.log_formatter import ColorLogFormatter, STYLES, COLORS as FmtColors, RESET
-from tinycoder.ui.spinner import Spinner
 from tinycoder.docker_manager import DockerManager
 
 COMMIT_PREFIX = "🤖 tinycoder: "
@@ -45,7 +44,6 @@ class App:
         self.verbose = verbose
         self._setup_logging()
         self._init_llm_client(model)
-        self._init_spinner()
         self._setup_git()
         self._init_core_managers(continue_chat)
         self._setup_docker() # Initialize Docker manager
@@ -112,11 +110,6 @@ class App:
             print(f"{FmtColors['RED']}Error: Failed to initialize LLM client. {e}{RESET}", file=sys.stderr)
             print("Please check model name or API key environment variables.", file=sys.stderr)
             sys.exit(1)
-
-    def _init_spinner(self) -> None:
-        """Initializes the console spinner."""
-        self.spinner = Spinner("💭 Thinking...")
-        self.logger.debug("Spinner initialized.")
 
     def _setup_git(self) -> None:
         """Initializes GitManager, checks for Git, finds root, and optionally initializes a repo."""
@@ -792,13 +785,45 @@ class App:
             
             self.logger.debug(f"Approx. input tokens to send: {input_tokens}")
 
-            self.spinner.start()
-            try:
-                response_content, error_message = self.client.generate_content(
-                    system_prompt=system_prompt_text, history=history_to_send
-                )
-            finally:
-                self.spinner.stop()
+            response_content = None
+            error_message = None
+
+            # Check for streaming capability
+            if hasattr(self.client, 'generate_content_stream'):
+                assistant_header = [('class:assistant.header', 'ASSISTANT'), ('', ':\n')]
+                print_formatted_text(FormattedText(assistant_header), style=self.style)
+                
+                full_response_chunks = []
+                try:
+                    stream = self.client.generate_content_stream(
+                        system_prompt=system_prompt_text, history=history_to_send
+                    )
+                    for chunk in stream:
+                        if "STREAMING_ERROR:" in chunk:
+                            error_message = chunk.replace("STREAMING_ERROR:", "").strip()
+                            break
+                        
+                        # Use print_formatted_text to be safe with prompt_toolkit rendering
+                        print_formatted_text(chunk, end='')
+                        sys.stdout.flush() # Ensure chunks are displayed immediately
+                        full_response_chunks.append(chunk)
+                    
+                    print() # Newline after the full response
+                    if not error_message:
+                        response_content = "".join(full_response_chunks)
+
+                except Exception as e:
+                    self.logger.error(f"Error while streaming from LLM: {e}", exc_info=True)
+                    error_message = f"An unexpected error occurred during streaming: {e}"
+            
+            else: # Fallback to original non-streaming behavior, but without spinner
+                try:
+                    response_content, error_message = self.client.generate_content(
+                        system_prompt=system_prompt_text, history=history_to_send
+                    )
+                except Exception as e:
+                    self.logger.error(f"Error calling LLM: {e}", exc_info=True)
+                    error_message = f"An unexpected error occurred during LLM API call: {e}"
 
             # --- Handle response ---
             if error_message:
@@ -807,24 +832,26 @@ class App:
                 )
                 return None
             elif response_content is None:
-                # Should be covered by error_message, but handle defensively
-                self.logger.error(
-                    f"LLM API ({self.client.__class__.__name__}) returned no content and no error message.",
+                self.logger.warning(
+                    f"LLM API ({self.client.__class__.__name__}) returned no content.",
                 )
                 return None
             else:
-                assistant_header = [('class:assistant.header', 'ASSISTANT'), ('', ':\n')]
-                print_formatted_text(FormattedText(assistant_header), style=self.style)
+                # For non-streaming, we need to print the response here.
+                # For streaming, it was already printed chunk-by-chunk.
+                if not hasattr(self.client, 'generate_content_stream'):
+                    assistant_header = [('class:assistant.header', 'ASSISTANT'), ('', ':\n')]
+                    print_formatted_text(FormattedText(assistant_header), style=self.style)
 
-                # Format for display if in ask mode and not an edit block
-                if self.mode == "ask" and response_content and not response_content.strip().startswith("<"):
-                    display_response_tuples = self._format_markdown_for_terminal(response_content)
-                    print_formatted_text(FormattedText(display_response_tuples), style=self.style)
-                else:
-                    # Print raw content, but use prompt_toolkit to handle potential long lines
-                    print_formatted_text(response_content)
-                
-                print() # Add a final newline for spacing
+                    # Format for display if in ask mode and not an edit block
+                    if self.mode == "ask" and response_content and not response_content.strip().startswith("<"):
+                        display_response_tuples = self._format_markdown_for_terminal(response_content)
+                        print_formatted_text(FormattedText(display_response_tuples), style=self.style)
+                    else:
+                        # Print raw content, but use prompt_toolkit to handle potential long lines
+                        print_formatted_text(response_content)
+                    
+                    print() # Add a final newline for spacing
 
                 output_chars = len(response_content)
                 output_tokens = round(output_chars / 4) # Based on raw response
@@ -1165,17 +1192,13 @@ class App:
         )
 
         history_for_files = [{"role": "user", "content": instruction}]
-        self.spinner.start()
         try:
             response_content, error_message = self.client.generate_content(
                 system_prompt=system_prompt, history=history_for_files
             )
         except KeyboardInterrupt:
             self.logger.info("\nLLM file suggestion cancelled.")
-            # The finally block will handle stopping the spinner.
             return []  # Return empty list on cancellation
-        finally:
-            self.spinner.stop()
 
         if error_message:
             self.logger.error(f"Error asking LLM for files: {error_message}")
