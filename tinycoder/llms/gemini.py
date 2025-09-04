@@ -143,26 +143,27 @@ class GeminiClient(LLMClient):
             "x-goog-api-key": self._api_key
         }
 
+        response = None
         try:
-            with requests.post(stream_api_url, headers=headers, json=payload, stream=True, timeout=180) as response:
-                response.raise_for_status()
-                for line in response.iter_lines():
-                    if line:
-                        decoded_line = line.decode('utf-8')
-                        if decoded_line.startswith('data: '):
-                            json_str = decoded_line[6:]
-                            try:
-                                data = json.loads(json_str)
-                                if "candidates" in data and data["candidates"]:
-                                    candidate = data["candidates"][0]
-                                    if "content" in candidate and "parts" in candidate["content"]:
-                                        for part in candidate["content"]["parts"]:
-                                            if "text" in part:
-                                                yield part["text"]
-                            except json.JSONDecodeError:
-                                # In SSE, there can be other message types or partial data.
-                                # For this implementation, we silently ignore parsing errors.
-                                continue
+            response = requests.post(stream_api_url, headers=headers, json=payload, stream=True, timeout=180)
+            response.raise_for_status()
+            for line in response.iter_lines():
+                if line:
+                    decoded_line = line.decode('utf-8')
+                    if decoded_line.startswith('data: '):
+                        json_str = decoded_line[6:]
+                        try:
+                            data = json.loads(json_str)
+                            if "candidates" in data and data["candidates"]:
+                                candidate = data["candidates"][0]
+                                if "content" in candidate and "parts" in candidate["content"]:
+                                    for part in candidate["content"]["parts"]:
+                                        if "text" in part:
+                                            yield part["text"]
+                        except json.JSONDecodeError:
+                            # In SSE, there can be other message types or partial data.
+                            # For this implementation, we silently ignore parsing errors.
+                            continue
         except requests.RequestException as e:
             error_msg = f"Gemini API Request Error: {e}"
             if e.response is not None:
@@ -174,3 +175,6 @@ class GeminiClient(LLMClient):
             yield f"STREAMING_ERROR: {error_msg}"
         except Exception as e:
             yield f"STREAMING_ERROR: An unexpected error occurred during Gemini API stream: {e}"
+        finally:
+            if response:
+                response.close()
