@@ -391,9 +391,9 @@ class App:
                     )
                     self.logger.info(f"Added {added_count} file(s) to context: {', '.join(successfully_added_fnames)}")
             else:
-                self.logger.info("No suggested files were added to the context.")
+                self.logger.debug("No suggested files were added to the context.")
         elif instruction: # _ask_llm_for_files was called but returned no files
-            self.logger.info("LLM did not suggest any files based on the provided instruction.")
+            self.logger.debug("LLM did not suggest any files based on the provided instruction.")
         # If instruction was empty, it's logged before calling _ask_llm_for_files
 
 
@@ -1003,7 +1003,7 @@ class App:
             else:
                  # Info/warnings about non-existent or already-in-context files have been printed.
                  # If there are no *new* files to add, we can inform.
-                 self.logger.info("No new, existing files to add from LLM's request.")
+                 self.logger.debug("No new, existing files to add from LLM's request.")
             return False
 
         self.logger.info(f"{FmtColors['BLUE']}LLM suggests adding these existing files to context:{RESET}")
@@ -1049,7 +1049,7 @@ class App:
             else:
                 self.logger.info("No files were ultimately added from LLM's request despite confirmation.")
         else: 
-            self.logger.info("User chose not to add files requested by LLM, or selection was invalid.")
+            self.logger.debug("User chose not to add files requested by LLM, or selection was invalid.")
             self.reflected_message = "User declined to add the requested files. Please advise on how to proceed or if you can continue without them."
             return True
 
@@ -1146,7 +1146,7 @@ class App:
 
                     if all_succeeded:
                         if modified_files:
-                            self.logger.info("All edits applied successfully.")
+                            self.logger.debug("All edits applied successfully.")
                             # Automate Docker actions before committing
                             self._handle_docker_automation(list(modified_files), non_interactive=non_interactive)
                             self._git_add_commit(list(modified_files))
@@ -1165,7 +1165,7 @@ class App:
                         self.reflected_message = error_message 
                     
                 else:  # No edits found by parser (and no file requests were actioned to cause reflection)
-                    self.logger.info("No actionable edit blocks found in the response.")
+                    self.logger.debug("No actionable edit blocks found in the response.")
 
                 # --- Check for Lint Errors (related to edits) ---
                 # Only trigger lint reflection if no other more critical reflection (like edit failure) is already set.
