@@ -167,68 +167,70 @@ class OpenAIClient(LLMClient):
             # Catch any other unexpected errors during the process
             return None, f"An unexpected error occurred during OpenAI API call: {type(e).__name__} - {e}"
 
-    def generate_content_stream(self, system_prompt: str, history: List[Dict[str, str]]) -> Generator[str, None, None]:
-        """
-        Streams content from the OpenAI API, yielding text chunks as they arrive.
-        On error, yields a single 'STREAMING_ERROR: ...' message.
-        """
-        formatted_messages = self._format_history(system_prompt, history)
+    # def generate_content_stream(self, system_prompt: str, history: List[Dict[str, str]]) -> Generator[str, None, None]:
+    #     """
+    #     Streams content from the OpenAI API, yielding text chunks as they arrive.
+    #     On error, yields a single 'STREAMING_ERROR: ...' message.
+    #     """
+    #     formatted_messages = self._format_history(system_prompt, history)
 
-        if not formatted_messages:
-            yield "STREAMING_ERROR: Cannot send request to OpenAI with empty messages."
-            return
+    #     if not formatted_messages:
+    #         yield "STREAMING_ERROR: Cannot send request to OpenAI with empty messages."
+    #         return
 
-        if not any(msg['role'] == 'user' for msg in formatted_messages):
-            yield "STREAMING_ERROR: OpenAI API requires at least one user message."
-            return
+    #     if not any(msg['role'] == 'user' for msg in formatted_messages):
+    #         yield "STREAMING_ERROR: OpenAI API requires at least one user message."
+    #         return
 
-        payload = {
-            "model": self.model,
-            "messages": formatted_messages,
-            "stream": True,
-        }
+    #     payload = {
+    #         "model": self.model,
+    #         "messages": formatted_messages,
+    #         "stream": True,
+    #     }
 
-        try:
-            response = requests.post(
-                self.api_url, headers=self.headers, json=payload, stream=True, timeout=1000
-            )
-            response.raise_for_status()
+    #     try:
+    #         response = requests.post(
+    #             self.api_url, headers=self.headers, json=payload, stream=True, timeout=1000
+    #         )
+    #         print(payload)
+    #         print(response.content)
+    #         response.raise_for_status()
 
-            for raw_line in response.iter_lines():
-                if not raw_line:
-                    continue
-                try:
-                    line = raw_line.decode("utf-8")
-                except Exception:
-                    # Fallback: skip undecodable lines
-                    continue
+    #         for raw_line in response.iter_lines():
+    #             if not raw_line:
+    #                 continue
+    #             try:
+    #                 line = raw_line.decode("utf-8")
+    #             except Exception:
+    #                 # Fallback: skip undecodable lines
+    #                 continue
 
-                if not line.strip():
-                    continue
+    #             if not line.strip():
+    #                 continue
 
-                # OpenAI streams Server-Sent Events lines like "data: {...}"
-                data_str = line[6:] if line.startswith("data: ") else line
-                if data_str.strip() == "[DONE]":
-                    break
+    #             # OpenAI streams Server-Sent Events lines like "data: {...}"
+    #             data_str = line[6:] if line.startswith("data: ") else line
+    #             if data_str.strip() == "[DONE]":
+    #                 break
 
-                try:
-                    data = json.loads(data_str)
-                except json.JSONDecodeError:
-                    continue
+    #             try:
+    #                 data = json.loads(data_str)
+    #             except json.JSONDecodeError:
+    #                 continue
 
-                choices = data.get("choices")
-                if choices and len(choices) > 0:
-                    delta = choices[0].get("delta", {})
-                    content = delta.get("content")
-                    if content:
-                        yield content
+    #             choices = data.get("choices")
+    #             if choices and len(choices) > 0:
+    #                 delta = choices[0].get("delta", {})
+    #                 content = delta.get("content")
+    #                 if content:
+    #                     yield content
 
-            try:
-                response.close()
-            except Exception:
-                pass
+    #         try:
+    #             response.close()
+    #         except Exception:
+    #             pass
 
-        except requests.RequestException as e:
-            yield f"STREAMING_ERROR: OpenAI streaming request failed: {e}"
-        except Exception as e:
-            yield f"STREAMING_ERROR: Unexpected error during OpenAI streaming: {e}"
+    #     except requests.RequestException as e:
+    #         yield f"STREAMING_ERROR: OpenAI streaming request failed: {e}"
+    #     except Exception as e:
+    #         yield f"STREAMING_ERROR: Unexpected error during OpenAI streaming: {e}"
