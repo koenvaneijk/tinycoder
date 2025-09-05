@@ -1,5 +1,3 @@
-# coverage_tool.py
-
 import ast
 import importlib.abc
 import importlib.util
@@ -9,20 +7,17 @@ import sys
 import traceback
 import types
 import unittest
-import collections  # Added for defaultdict
+import collections
 import io
 from typing import Dict, List, Optional, Set, Tuple, Callable
 
-# --- Configuration ---
-# Directories relative to the script's execution location
-TEST_DIR: str = "./tests"
-TEST_FILE_PATTERN: str = "test_*.py"
-TARGET_FILE_SUFFIX: str = ".py"
+TEST_DIR = "./tests"
+TEST_FILE_PATTERN = "test_*.py"
+TARGET_FILE_SUFFIX = ".py"
 
-# Directories or files to exclude from coverage analysis
-EXCLUDE_DIRS: Set[str] = {
+EXCLUDE_DIRS = {
     "venv",
-    ".venv",  # Common virtualenv name
+    ".venv",
     "tests",
     "__pycache__",
     ".git",
@@ -38,152 +33,83 @@ EXCLUDE_DIRS: Set[str] = {
     ".mypy_cache",
     ".pytest_cache",
     "node_modules",
-    # Add potentially conflicting names if they are never source dirs
     "site-packages",
 }
-EXCLUDE_FILENAMES: Set[str] = {
+EXCLUDE_FILENAMES = {
     "setup.py",
-    "conftest.py",  # Common pytest configuration file
-    "coverage_tool.py",  # Exclude the tool itself
+    "conftest.py",
+    "coverage_tool.py",
 }
 
-# Get the absolute path of the directory where this script resides
-# Used to ensure the tool's own directory isn't processed if run from elsewhere
-_TOOL_SCRIPT_PATH: pathlib.Path = pathlib.Path(__file__).resolve()
-_CURRENT_WORKING_DIR: pathlib.Path = pathlib.Path(".").resolve()
-
-
-# --- Coverage Tracking ---
+_TOOL_SCRIPT_PATH = pathlib.Path(__file__).resolve()
+_CURRENT_WORKING_DIR = pathlib.Path(".").resolve()
 
 
 class CoverageTracker:
-    """
-    Tracks executed lines during code execution.
-
-    Stores hit lines as tuples of (resolved_filepath, lineno).
-    """
-
     def __init__(self) -> None:
-        """Initializes the CoverageTracker."""
-        # Using resolved paths ensures consistency regardless of how the file
-        # was imported or accessed.
         self.hits: Set[Tuple[str, int]] = set()
 
     def hit(self, filepath: str, lineno: int) -> None:
-        """
-        Records a line as executed. Called by instrumented code.
-
-        Args:
-            filepath: The path to the file where the line was executed.
-                      This should typically be the value of `__file__`.
-            lineno: The line number that was executed.
-        """
-        # Resolve the path to ensure consistency. This might be slightly
-        # redundant if __file__ is already resolved, but guarantees it.
         try:
             resolved_path = str(pathlib.Path(filepath).resolve())
             self.hits.add((resolved_path, lineno))
         except OSError as e:
-            # Handle cases where the path might be invalid (e.g., during cleanup)
             print(
                 f"Warning: Could not resolve path '{filepath}' during hit: {e}",
                 file=sys.stderr,
             )
 
 
-# Global tracker instance accessible by instrumented code via injection.
-# Using a double underscore prefix makes it less likely to clash with user code.
-__coverage_tracker__: CoverageTracker = CoverageTracker()
+__coverage_tracker__ = CoverageTracker()
 
 
 # --- AST Helper ---
 
 
 class ScopeFinder(ast.NodeVisitor):
-    """
-    Visits an AST to map line numbers to their containing scope name string
-    (e.g., '[module level] / class MyClass / function my_method').
-
-    Requires Python 3.8+ for accurate end_lineno on all node types.
-    Without end_lineno, mapping might be less precise for multi-line statements.
-    """
-
     def __init__(self):
-        # Maps line number -> scope name string
         self.line_to_scope: Dict[int, str] = {}
-        # Stack to keep track of the current scope hierarchy
         self._scope_stack: List[str] = []
 
     def _get_current_scope_name(self) -> str:
-        """Returns the current scope name string."""
         return " / ".join(self._scope_stack) if self._scope_stack else "[unknown]"
 
     def visit(self, node: ast.AST):
-        """Generic visit: map node's lines to current scope before specific visits."""
-        # Map lines for the current node *before* potentially entering/leaving a scope
         if hasattr(node, "lineno"):
             current_scope = self._get_current_scope_name()
             start_line = node.lineno
-            # Use end_lineno if available (Python 3.8+)
             end_line = getattr(node, "end_lineno", start_line)
-            # Ensure end_line is not None, default to start_line if it is
             if end_line is None:
                 end_line = start_line
-
-            # Map all lines within this node's range to the current scope context.
-            # Deeper scopes visited later will overwrite the mapping for their lines.
             for line_num in range(start_line, end_line + 1):
                 self.line_to_scope[line_num] = current_scope
-
-        # Continue traversal - specific visitors below handle scope stack changes
         super().visit(node)
 
-    # Override scope-defining nodes to manage the stack
-
     def visit_Module(self, node: ast.Module):
-        """Visit module, setting the base scope."""
-        # Module node itself doesn't have line numbers in the same way statements do.
-        # We rely on the generic visit mapping lines before we enter specific scopes.
         self._scope_stack.append("[module level]")
-        self.generic_visit(node)  # Visit module body children
-        self._scope_stack.pop()  # Pop module scope at the end
+        self.generic_visit(node)
+        self._scope_stack.pop()
 
     def visit_FunctionDef(self, node: ast.FunctionDef):
-        """Visit function, manage scope stack."""
         scope_id = f"function {node.name}"
         self._scope_stack.append(scope_id)
-        # Let generic visit handle mapping lines for the function node itself first
-        # Then visit children within the new scope context
         self.generic_visit(node)
-        self._scope_stack.pop()  # Pop function scope after visiting children
+        self._scope_stack.pop()
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
-        """Visit async function, manage scope stack."""
         scope_id = f"async function {node.name}"
         self._scope_stack.append(scope_id)
         self.generic_visit(node)
         self._scope_stack.pop()
 
     def visit_ClassDef(self, node: ast.ClassDef):
-        """Visit class, manage scope stack."""
         scope_id = f"class {node.name}"
         self._scope_stack.append(scope_id)
-        self.generic_visit(node)  # Visit children (methods, etc.) within this new scope
-        self._scope_stack.pop()  # Pop class scope
+        self.generic_visit(node)
+        self._scope_stack.pop()
 
 
 def _is_docstring_or_bare_constant(node: ast.AST) -> bool:
-    """
-    Checks if an AST node is an expression consisting solely of a constant
-    string or bytes. This is typically a docstring or a module-level constant
-    assignment without a variable.
-
-    Args:
-        node: The AST node to check.
-
-    Returns:
-        True if the node is a bare string/bytes constant expression, False otherwise.
-    """
     return (
         isinstance(node, ast.Expr)
         and isinstance(node.value, ast.Constant)
@@ -195,32 +121,13 @@ def _is_docstring_or_bare_constant(node: ast.AST) -> bool:
 
 
 class ExecutableLineCollector(ast.NodeVisitor):
-    """
-    Collects the line numbers of potentially executable statements in an AST.
-
-    Excludes lines containing only docstrings or bare string/bytes constants.
-    """
-
     def __init__(self) -> None:
-        """Initializes the ExecutableLineCollector."""
         self.lines: Set[int] = set()
 
     def visit(self, node: ast.AST) -> None:
-        """
-        Visits an AST node, adding its line number to the set if executable.
-
-        Args:
-            node: The AST node to visit.
-        """
-        # We are interested in statements that have a line number.
-        # AST nodes that are not statements (e.g., expressions, operators)
-        # don't represent standalone executable lines in the way we track coverage.
         if isinstance(node, ast.stmt) and hasattr(node, "lineno"):
-            # Exclude nodes that are just docstrings or bare constants
             if not _is_docstring_or_bare_constant(node):
                 self.lines.add(node.lineno)
-
-        # Continue traversing the AST
         self.generic_visit(node)
 
 
@@ -228,36 +135,11 @@ class ExecutableLineCollector(ast.NodeVisitor):
 
 
 class InstrumentationTransformer(ast.NodeTransformer):
-    """
-    Transforms an AST to insert coverage tracking calls before executable lines.
-    """
-
     def __init__(self, filename: str) -> None:
-        """
-        Initializes the InstrumentationTransformer.
-
-        Args:
-            filename: The original path of the file being instrumented. This
-                      will be embedded in the tracking calls. Should be resolved path.
-        """
-        self.filename: str = filename  # Expecting resolved path here
-        # Tracks lines instrumented within the current list of statements being processed
-        # to avoid inserting multiple trackers for the same line number if a single
-        # statement spans multiple lines conceptually but resolves to one line number.
+        self.filename: str = filename
         self._instrumented_in_current_block: Set[int] = set()
 
     def _create_tracking_call(self, lineno: int) -> ast.Expr:
-        """
-        Creates the AST node for the coverage tracker call.
-
-        Generates AST for: `__coverage_tracker__.hit(self.filename, lineno)`
-
-        Args:
-            lineno: The line number to be recorded.
-
-        Returns:
-            An ast.Expr node representing the tracking call.
-        """
         return ast.Expr(
             value=ast.Call(
                 func=ast.Attribute(
@@ -266,7 +148,7 @@ class InstrumentationTransformer(ast.NodeTransformer):
                     ctx=ast.Load(),
                 ),
                 args=[
-                    ast.Constant(value=self.filename),  # Pass the resolved path
+                    ast.Constant(value=self.filename),
                     ast.Constant(value=lineno),
                 ],
                 keywords=[],
@@ -274,25 +156,11 @@ class InstrumentationTransformer(ast.NodeTransformer):
         )
 
     def _process_statement_list(self, body: List[ast.stmt]) -> List[ast.stmt]:
-        """
-        Processes a list of statements (like a function body or module body),
-        inserting tracking calls before executable lines.
-
-        Args:
-            body: The list of statement nodes.
-
-        Returns:
-            A new list of statements with tracking calls inserted.
-        """
         new_body: List[ast.stmt] = []
-        # Reset tracking for this specific block/list of statements
         self._instrumented_in_current_block = set()
 
         for node in body:
-            # Ensure node is a statement with a line number before processing
             if isinstance(node, ast.stmt) and hasattr(node, "lineno"):
-                # Check if it's an executable line (not just a docstring)
-                # and hasn't been instrumented in this block yet.
                 if (
                     not _is_docstring_or_bare_constant(node)
                     and node.lineno not in self._instrumented_in_current_block
@@ -300,46 +168,23 @@ class InstrumentationTransformer(ast.NodeTransformer):
                     new_body.append(self._create_tracking_call(node.lineno))
                     self._instrumented_in_current_block.add(node.lineno)
 
-            # Visit the original node itself to process nested structures
-            # (like function defs, class defs, loops) using the transformer's logic.
-            visited_node = self.visit(
-                node
-            )  # This calls the appropriate visit_... method
+            visited_node = self.visit(node)
 
-            # Add the (potentially transformed) original node
-            # If visit returns None (e.g., for deleted nodes), skip.
-            # If visit returns a list (e.g., for expanded constructs), extend.
             if visited_node:
-                # Ensure we handle the case where visit returns a list (though unlikely for stmts)
                 if isinstance(visited_node, list):
                     new_body.extend(visited_node)
-                # If visit returns a single node (the common case)
-                elif isinstance(visited_node, ast.AST):  # Check it's still an AST node
-                    new_body.append(visited_node)  # type: ignore # AST node is expected here
-                # else: Handle other potential return types if necessary
-            # else: Node was removed by visit method
+                elif isinstance(visited_node, ast.AST):
+                    new_body.append(visited_node)
 
         return new_body
 
-    # Override visit methods for nodes that contain lists of statements
-    # Ensure they recursively call _process_statement_list or self.visit correctly
-
     def visit_Module(self, node: ast.Module) -> ast.Module:
-        """Instruments the main body of a module."""
-        # We need to handle the module body directly, then visit children
-        # The default generic_visit might not handle module body list correctly
         node.body = self._process_statement_list(node.body)
-        # No need to call generic_visit if we processed the body list
         return node
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.FunctionDef:
-        """Instruments the body of a function."""
         outer_instrumented = self._instrumented_in_current_block
-        # Process decorators first if they exist
         node.decorator_list = [self.visit(d) for d in node.decorator_list]
-        # Process args if needed (usually not for line coverage)
-        # Process return annotation if needed
-        # Process the body
         node.body = self._process_statement_list(node.body)
         self._instrumented_in_current_block = outer_instrumented
         return node
@@ -347,7 +192,6 @@ class InstrumentationTransformer(ast.NodeTransformer):
     def visit_AsyncFunctionDef(
         self, node: ast.AsyncFunctionDef
     ) -> ast.AsyncFunctionDef:
-        """Instruments the body of an async function."""
         outer_instrumented = self._instrumented_in_current_block
         node.decorator_list = [self.visit(d) for d in node.decorator_list]
         node.body = self._process_statement_list(node.body)
@@ -355,27 +199,20 @@ class InstrumentationTransformer(ast.NodeTransformer):
         return node
 
     def visit_ClassDef(self, node: ast.ClassDef) -> ast.ClassDef:
-        """Instruments the body of a class definition."""
         outer_instrumented = self._instrumented_in_current_block
         node.decorator_list = [self.visit(d) for d in node.decorator_list]
-        # Process base classes, keywords if necessary
         node.body = self._process_statement_list(node.body)
         self._instrumented_in_current_block = outer_instrumented
         return node
 
-    # --- Blocks with bodies ---
     def visit_With(self, node: ast.With) -> ast.With:
-        """Instruments the body of a 'with' block."""
         outer_instrumented = self._instrumented_in_current_block
-        # Visit context items
         node.items = [self.visit(item) for item in node.items]
-        # Process body
         node.body = self._process_statement_list(node.body)
         self._instrumented_in_current_block = outer_instrumented
         return node
 
     def visit_AsyncWith(self, node: ast.AsyncWith) -> ast.AsyncWith:
-        """Instruments the body of an 'async with' block."""
         outer_instrumented = self._instrumented_in_current_block
         node.items = [self.visit(item) for item in node.items]
         node.body = self._process_statement_list(node.body)
@@ -383,20 +220,14 @@ class InstrumentationTransformer(ast.NodeTransformer):
         return node
 
     def visit_If(self, node: ast.If) -> ast.If:
-        """Instruments the 'if' and 'else' bodies."""
         outer_instrumented = self._instrumented_in_current_block
-        # Visit the test expression
         node.test = self.visit(node.test)
-        # Process the 'if' body
         node.body = self._process_statement_list(node.body)
-        # Process the 'else' body (which could be another If, or a list)
         if node.orelse:
-            # Visit the 'orelse' part. If it's a list, process it. If single If, visit it.
             new_orelse = []
-            current_orelse_instrumented = set()  # Reset for the else block
+            current_orelse_instrumented = set()
             self._instrumented_in_current_block = current_orelse_instrumented
             for item in node.orelse:
-                # Add tracker if needed for the first line of the else item
                 if isinstance(item, ast.stmt) and hasattr(item, "lineno"):
                     if (
                         not _is_docstring_or_bare_constant(item)
@@ -404,99 +235,72 @@ class InstrumentationTransformer(ast.NodeTransformer):
                     ):
                         new_orelse.append(self._create_tracking_call(item.lineno))
                         self._instrumented_in_current_block.add(item.lineno)
-                visited_item = self.visit(item)  # Recursively visit item in else block
+                visited_item = self.visit(item)
                 if visited_item:
                     if isinstance(visited_item, list):
                         new_orelse.extend(visited_item)
                     elif isinstance(visited_item, ast.AST):
-                        new_orelse.append(visited_item)  # type: ignore
+                        new_orelse.append(visited_item)
             node.orelse = new_orelse
         self._instrumented_in_current_block = outer_instrumented
         return node
 
     def visit_For(self, node: ast.For) -> ast.For:
-        """Instruments the 'for' loop body and 'else' block."""
         outer_instrumented = self._instrumented_in_current_block
-        # Visit target and iter
         node.target = self.visit(node.target)
         node.iter = self.visit(node.iter)
-        # Process body
         node.body = self._process_statement_list(node.body)
-        # Process orelse
         if node.orelse:
-            node.orelse = self._process_statement_list(node.orelse)  # type: ignore
+            node.orelse = self._process_statement_list(node.orelse)
         self._instrumented_in_current_block = outer_instrumented
         return node
 
     def visit_AsyncFor(self, node: ast.AsyncFor) -> ast.AsyncFor:
-        """Instruments the 'async for' loop body and 'else' block."""
         outer_instrumented = self._instrumented_in_current_block
         node.target = self.visit(node.target)
         node.iter = self.visit(node.iter)
         node.body = self._process_statement_list(node.body)
         if node.orelse:
-            node.orelse = self._process_statement_list(node.orelse)  # type: ignore
+            node.orelse = self._process_statement_list(node.orelse)
         self._instrumented_in_current_block = outer_instrumented
         return node
 
     def visit_While(self, node: ast.While) -> ast.While:
-        """Instruments the 'while' loop body and 'else' block."""
         outer_instrumented = self._instrumented_in_current_block
         node.test = self.visit(node.test)
         node.body = self._process_statement_list(node.body)
         if node.orelse:
-            node.orelse = self._process_statement_list(node.orelse)  # type: ignore
+            node.orelse = self._process_statement_list(node.orelse)
         self._instrumented_in_current_block = outer_instrumented
         return node
 
     def visit_Try(self, node: ast.Try) -> ast.Try:
-        """Instruments 'try', 'except', 'else', and 'finally' blocks."""
         outer_instrumented = self._instrumented_in_current_block
         node.body = self._process_statement_list(node.body)
-        # Instrument handlers
         new_handlers = []
         for handler in node.handlers:
             handler_outer_instrumented = self._instrumented_in_current_block
-            # visit handler.type, handler.name if needed
             handler.body = self._process_statement_list(handler.body)
             self._instrumented_in_current_block = handler_outer_instrumented
-            new_handlers.append(handler)  # Add the processed handler
+            new_handlers.append(handler)
         node.handlers = new_handlers
-        # Instrument orelse
         if node.orelse:
-            node.orelse = self._process_statement_list(node.orelse)  # type: ignore
-        # Instrument finalbody
+            node.orelse = self._process_statement_list(node.orelse)
         if node.finalbody:
-            node.finalbody = self._process_statement_list(node.finalbody)  # type: ignore
+            node.finalbody = self._process_statement_list(node.finalbody)
         self._instrumented_in_current_block = outer_instrumented
         return node
-
-    # Add visit_TryStar for Python 3.11+ if needed
 
 
 # --- Import Hook ---
 
 
 class CoverageImportHook(importlib.abc.MetaPathFinder, importlib.abc.Loader):
-    """
-    An import hook that intercepts imports of target files and loads
-    the pre-instrumented source code instead.
-    """
-
     def __init__(
         self, instrumented_sources: Dict[str, str], tracker: CoverageTracker
     ) -> None:
-        """
-        Initializes the CoverageImportHook.
-
-        Args:
-            instrumented_sources: A dictionary mapping resolved file paths to
-                                  their instrumented source code.
-            tracker: The CoverageTracker instance to inject into modules.
-        """
         self._instrumented_sources: Dict[str, str] = instrumented_sources
         self._tracker: CoverageTracker = tracker
-        # Track modules currently being executed by this hook to prevent recursion
         self._modules_in_exec: Set[str] = set()
 
     def find_spec(
@@ -572,17 +376,12 @@ class CoverageImportHook(importlib.abc.MetaPathFinder, importlib.abc.Loader):
         return None
 
     def exec_module(self, module: types.ModuleType) -> None:
-        """
-        Executes the instrumented source code for the given module.
-        Injects the `__coverage_tracker__` global before execution.
-        """
         if module.__spec__ is None or module.__spec__.origin is None:
             raise ImportError(f"Module spec or origin missing for {module.__name__}")
 
         module_path = module.__spec__.origin
 
         if module_path in self._modules_in_exec:
-            # print(f"DEBUG: Skipping re-entrant exec_module for {module_path}") # Debug
             return
 
         instrumented_source = self._instrumented_sources.get(module_path)
@@ -592,36 +391,18 @@ class CoverageImportHook(importlib.abc.MetaPathFinder, importlib.abc.Loader):
                 f"during exec_module for module {module.__name__}"
             )
 
-        # Set standard attributes (importlib usually does this based on spec)
         module.__name__ = module.__spec__.name
         module.__file__ = module.__spec__.origin
         module.__loader__ = self
         module.__package__ = module.__spec__.parent
         module.__spec__ = module.__spec__
-        # If it's a package, importlib should set __path__ based on submodule_search_locations in the spec
-        # if module.__spec__.submodule_search_locations is not None:
-        #     module.__path__ = module.__spec__.submodule_search_locations
 
-        # Inject the tracker
         module.__dict__["__coverage_tracker__"] = self._tracker
-
-        # print(f"DEBUG: Executing module: {module.__name__} ({module_path})")
-        # print(f"DEBUG: Spec Origin: {module.__spec__.origin}")
-        # # --- Add more debug ---
-        # print(f"DEBUG: Spec Name: {module.__spec__.name}")
-        # print(f"DEBUG: Spec is_package: {getattr(module.__spec__, 'submodule_search_locations', None) is not None}") # Better check for package nature based on locations
-        # print(f"DEBUG: Spec submodule_search_locations: {getattr(module.__spec__, 'submodule_search_locations', None)}")
-        # print(f"DEBUG: Module __package__: {getattr(module, '__package__', None)}")
-        # # --- End Add more debug ---
 
         self._modules_in_exec.add(module_path)
         try:
             code = compile(instrumented_source, module_path, "exec", dont_inherit=True)
-            # print(f"DEBUG: Module dict before exec: {list(module.__dict__.keys())}") # Optional Debug
             exec(code, module.__dict__)
-            # print(f"DEBUG: Finished executing module: {module.__name__}") # Debug
-            # print(f"DEBUG: Module dict after exec: {list(module.__dict__.keys())}") # Optional Debug
-
         except Exception as e:
             print(
                 f"\n--- Error during execution of instrumented module: {module_path} ---",
@@ -631,7 +412,7 @@ class CoverageImportHook(importlib.abc.MetaPathFinder, importlib.abc.Loader):
             print(
                 f"--- Module Dict Keys: {list(module.__dict__.keys())} ---",
                 file=sys.stderr,
-            )  # Debug info
+            )
             print("--- End Error ---", file=sys.stderr)
             raise e
         finally:
