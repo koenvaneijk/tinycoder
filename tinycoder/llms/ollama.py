@@ -2,7 +2,7 @@ import os
 import tinycoder.requests as requests
 import json
 import sys
-from typing import List, Dict, Optional, Tuple, Any
+from typing import List, Dict, Optional, Tuple, Any, Generator
 
 from tinycoder.llms.base import LLMClient
 
@@ -169,3 +169,75 @@ class OllamaClient(LLMClient):
         except Exception as e:
             # Catch any other unexpected errors
             return None, f"An unexpected error occurred during Ollama API call: {type(e).__name__} - {e}"
+
+    def generate_content_stream(self, system_prompt: str, history: List[Dict[str, str]]) -> Generator[str, None, None]:
+        """
+        Streams content from a local Ollama server, yielding chunks as they arrive.
+        On error, yields a single 'STREAMING_ERROR: ...' message.
+        """
+        formatted_messages = self._format_history(system_prompt, history)
+
+        if not formatted_messages:
+            yield "STREAMING_ERROR: Cannot send request to Ollama with empty messages."
+            return
+
+        payload = {
+            "model": self.model,
+            "messages": formatted_messages,
+            "stream": True,
+        }
+
+        headers = {"Content-Type": "application/json"}
+
+        try:
+            response = requests.post(
+                self.api_url, headers=headers, json=payload, stream=True, timeout=180
+            )
+            response.raise_for_status()
+
+            for raw_line in response.iter_lines():
+                if not raw_line:
+                    continue
+                try:
+                    line = raw_line.decode("utf-8")
+                except Exception:
+                    continue
+
+                if not line.strip():
+                    continue
+
+                # Ollama often streams line-delimited JSON (not strictly SSE "data: ").
+                data_str = line[6:] if line.startswith("data: ") else line
+
+                try:
+                    data = json.loads(data_str)
+                except json.JSONDecodeError:
+                    continue
+
+                # If API surfaces an explicit error
+                if "error" in data and data["error"]:
+                    yield f"STREAMING_ERROR: Ollama API Error: {data['error']}"
+                    break
+
+                # Chat streaming typically includes incremental message content
+                if isinstance(data.get("message"), dict):
+                    content = data["message"].get("content")
+                    if content:
+                        yield content
+                elif "response" in data:
+                    # Non-chat or some servers stream 'response'
+                    if data["response"]:
+                        yield data["response"]
+
+                if data.get("done") is True:
+                    break
+
+            try:
+                response.close()
+            except Exception:
+                pass
+
+        except requests.RequestException as e:
+            yield f"STREAMING_ERROR: Ollama streaming request failed: {e}"
+        except Exception as e:
+            yield f"STREAMING_ERROR: Unexpected error during Ollama streaming: {e}"

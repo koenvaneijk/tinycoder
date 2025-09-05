@@ -1,7 +1,7 @@
 import os
 import sys
 import json
-from typing import List, Dict, Optional, Tuple, Any
+from typing import List, Dict, Optional, Tuple, Any, Generator
 
 import tinycoder.requests as requests # Use the local requests shim
 from tinycoder.llms.base import LLMClient
@@ -172,3 +172,86 @@ class AnthropicClient(LLMClient):
         except Exception as e:
             # Catch any other unexpected errors during the process
             return None, f"An unexpected error occurred during Anthropic API call: {type(e).__name__} - {e}"
+
+    def generate_content_stream(self, system_prompt: str, history: List[Dict[str, str]]) -> Generator[str, None, None]:
+        """
+        Streams content from the Anthropic API, yielding text chunks as they arrive.
+        On error, yields a single 'STREAMING_ERROR: ...' message.
+        """
+        formatted_messages = self._format_history(history)
+
+        if not formatted_messages and not system_prompt:
+            yield "STREAMING_ERROR: Cannot send request to Anthropic with empty system prompt and messages."
+            return
+
+        if not any(msg['role'] == 'user' for msg in formatted_messages):
+            yield "STREAMING_ERROR: Cannot send request to Anthropic without at least one user message."
+            return
+
+        payload = {
+            "model": self.model,
+            "messages": formatted_messages,
+            "system": system_prompt if system_prompt else None,
+            "stream": True,
+        }
+        if not payload["system"]:
+            del payload["system"]
+
+        try:
+            response = requests.post(
+                self.api_url, headers=self.headers, json=payload, stream=True, timeout=600
+            )
+            response.raise_for_status()
+
+            for raw_line in response.iter_lines():
+                if not raw_line:
+                    continue
+                try:
+                    line = raw_line.decode("utf-8")
+                except Exception:
+                    continue
+
+                if not line.strip():
+                    continue
+
+                if not line.startswith("data: "):
+                    # Anthropic uses SSE; ignore comments or non-data lines
+                    if line.startswith(":"):
+                        continue
+                    # Fallback: if a bare JSON line arrives
+                    data_str = line
+                else:
+                    data_str = line[len("data: "):]
+
+                if data_str.strip() == "[DONE]":
+                    break
+
+                try:
+                    event = json.loads(data_str)
+                except json.JSONDecodeError:
+                    continue
+
+                # Anthropic streaming event types:
+                # content_block_delta with {"delta":{"text":"..."}}
+                ev_type = event.get("type")
+                if ev_type == "content_block_delta":
+                    delta = event.get("delta", {})
+                    text = delta.get("text")
+                    if text:
+                        yield text
+                elif ev_type in ("message_stop", "message_delta"):
+                    # Reached end or metadata update; continue until stream ends.
+                    stop_reason = event.get("stop_reason")
+                    if stop_reason in ("max_tokens", "end_turn", "stop_sequence"):
+                        # Do nothing special for now
+                        pass
+
+            try:
+                response.close()
+            except Exception:
+                pass
+
+        except requests.RequestException as e:
+            yield f"STREAMING_ERROR: Anthropic streaming request failed: {e}"
+        except Exception as e:
+            yield f"STREAMING_ERROR: Unexpected error during Anthropic streaming: {e}"

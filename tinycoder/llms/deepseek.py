@@ -335,3 +335,42 @@ class DeepSeekClient(LLMClient):
             error_message = f"DeepSeek API Error: Unexpected response type ({type(response_content)}) for non-streaming call."
             logger.error(error_message)
             return None, error_message
+
+    def generate_content_stream(self, system_prompt: str, history: List[Dict[str, str]]):
+        """
+        Streams content from the DeepSeek API via the answer() helper, yielding text chunks.
+        On error, yields a single 'STREAMING_ERROR: ...' message.
+        """
+        try:
+            formatted_messages = self._format_history(system_prompt, history)
+            stream_gen = answer(
+                messages=formatted_messages,
+                model=self.model,
+                api_key=self._api_key,
+                stream=True,
+            )
+
+            for item in stream_gen:
+                try:
+                    item_type = item.get("type")
+                except Exception:
+                    # Defensive: if unexpected type
+                    continue
+
+                if item_type == "content":
+                    data = item.get("data")
+                    if data:
+                        yield data
+                elif item_type == "error":
+                    err = item.get("data") or "Unknown error"
+                    yield f"STREAMING_ERROR: DeepSeek streaming error: {err}"
+                    break
+                elif item_type == "finish":
+                    break
+                else:
+                    # Ignore other event types for now (e.g., tool_calls)
+                    continue
+
+        except Exception as e:
+            import traceback
+            yield f"STREAMING_ERROR: Unexpected error during DeepSeek streaming: {e}\n{traceback.format_exc()}"
