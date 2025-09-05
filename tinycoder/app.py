@@ -1409,7 +1409,7 @@ class App:
                 # 1. Build the prompt message
                 mode_str = self.mode.upper() # Use uppercase for consistency
                 prompt_message = FormattedText([
-                    ('class:prompt.mode', f'({mode_str})'),
+                    ('class:prompt.mode', f'{mode_str}'),
                     ('class:prompt.separator', ' > '),
                 ])
 

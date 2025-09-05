@@ -8,7 +8,7 @@ from tinycoder.llms.base import LLMClient
 import os
 
 # Default model
-DEFAULT_OPENAI_MODEL = "o3-2025-04-16"
+DEFAULT_OPENAI_MODEL = "gpt-5"
 OPENAI_API_ENDPOINT = "https://api.openai.com/v1/chat/completions"
 OPENAI_API_KEY_ENV_VAR = "OPENAI_API_KEY"
 

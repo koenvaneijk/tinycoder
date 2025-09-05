@@ -134,9 +134,6 @@ def answer(
 
                                     # Check for finish reason to yield final status and stop iteration
                                     if finish_reason:
-                                        logger.info(
-                                            f"Stream finished with reason: {finish_reason}"
-                                        )
                                         yield {"type": "finish", "data": finish_reason}
                                         break  # Stop processing lines after finish
                             except json.JSONDecodeError:
@@ -274,9 +271,6 @@ class DeepSeekClient(LLMClient):
         super().__init__(
             model=resolved_model, api_key=resolved_api_key
         )  # Pass resolved values to base
-        print(
-            f"INFO: Using DeepSeek model: {self.model}", file=sys.stderr
-        )  # Info message
 
     def _format_history(
         self, system_prompt: str, history: List[Dict[str, str]]

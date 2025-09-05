@@ -362,12 +362,12 @@ def request(
                         "Decompressed gzipped response content."
                     )  # Add logger if available or use print
                 except gzip.BadGzipFile:
-                    logger.error(
+                    logger.debug(
                         "Failed to decompress gzip content, using raw content."
                     )  # Add logger
                     resp._content = raw_content  # Fallback to raw content on error
                 except Exception as e:
-                    logger.error(
+                    logger.debug(
                         f"Unexpected error during gzip decompression: {e}",
                         exc_info=True,
                     )  # Add logger

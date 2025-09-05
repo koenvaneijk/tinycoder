@@ -3,8 +3,9 @@ import tinycoder.requests as requests
 import json
 import sys
 from typing import List, Dict, Optional, Tuple, Iterator
-from tinycoder.llms.base import LLMClient 
-DEFAULT_GEMINI_MODEL = "gemini-1.5-pro-latest"
+from tinycoder.llms.base import LLMClient
+ 
+DEFAULT_GEMINI_MODEL = "gemini-2.5-pro"
 API_ENDPOINT = "generateContent"
 
 class GeminiClient(LLMClient):

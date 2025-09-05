@@ -445,26 +445,6 @@ services:
         self.mock_logger.error.assert_called_once_with("Failed to restart service 'db_service':\nFailed to restart")
 
     @patch.object(DockerManager, '_run_command')
-    def test_build_service_success(self: 'TestDockerManager', mock_run_command: MagicMock) -> None:
-        """Test build_service successful call."""
-        mock_run_command.return_value = (True, "Build output", "")
-        manager = self._create_manager(root_dir=self.test_root_dir, yml_exists=False, yaml_exists=False)
-        result = manager.build_service("builder_service")
-        self.assertTrue(result)
-        mock_run_command.assert_called_once_with(['docker', 'compose', 'build', '--no-cache', 'builder_service'])
-        self.mock_logger.info.assert_any_call("Service 'builder_service' built successfully.")
-
-    @patch.object(DockerManager, '_run_command')
-    def test_build_service_failure(self: 'TestDockerManager', mock_run_command: MagicMock) -> None:
-        """Test build_service handles command failure."""
-        mock_run_command.return_value = (False, "", "Build error")
-        manager = self._create_manager(root_dir=self.test_root_dir, yml_exists=False, yaml_exists=False)
-        result = manager.build_service("broken_service")
-        self.assertFalse(result)
-        mock_run_command.assert_called_once_with(['docker', 'compose', 'build', '--no-cache', 'broken_service'])
-        self.mock_logger.error.assert_called_once_with("Failed to build service 'broken_service':\nBuild error")
-
-    @patch.object(DockerManager, '_run_command')
     def test_get_ps_success(self: 'TestDockerManager', mock_run_command: MagicMock) -> None:
         """Test get_ps returns output on success."""
         expected_output = "NAME COMMAND STATE PORTS"

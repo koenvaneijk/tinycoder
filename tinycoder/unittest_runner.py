@@ -95,7 +95,6 @@ def run_tests(
         root_dir_str = git_manager.get_root()
         if root_dir_str:
             root_dir = Path(root_dir_str)
-            logger.info(f"Using Git repository root: {root_dir}")
         else:
             logger.error("Could not determine Git repository root despite being in a repo.")
             root_dir = Path.cwd()
@@ -126,7 +125,7 @@ def run_tests(
 
         # Log discovered start directories (relative to root)
         rel_dirs = [str(Path(d).resolve().relative_to(root_dir.resolve())) or "." for d in start_dirs]
-        logger.info("Discovering tests in the following directories (pattern: test_*.py):\n- " + "\n- ".join(rel_dirs))
+        logger.debug("Discovering tests in the following directories (pattern: test_*.py):\n- " + "\n- ".join(rel_dirs))
 
         for start_dir in start_dirs:
             try:

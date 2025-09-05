@@ -159,15 +159,15 @@ tinycoder --provider ollama # Uses default Ollama model (e.g., qwen3:14b)
 
 # Specify both provider and model name (no prefix needed on model)
 tinycoder --provider gemini --model gemini-1.5-flash
-tinycoder --provider deepseek --model deepseek-coder
+tinycoder --provider deepseek --model deepseek-reasoner
 tinycoder --provider ollama --model llama3
 tinycoder --provider anthropic --model claude-3-sonnet-20240229
 tinycoder --provider groq --model llama3-8b-8192
 
 # If --provider is omitted, --model assumes Ollama or uses legacy prefixes
 tinycoder --model llama3 # Assumes Ollama provider
-tinycoder --model gemini-1.5-pro # Uses legacy prefix detection
-tinycoder --model deepseek-coder # Uses legacy prefix detection
+tinycoder --model gemini-2.5-pro # Uses legacy prefix detection
+tinycoder --model deepseek-reasoner # Uses legacy prefix detection
 tinycoder --model groq-llama3-8b-8192 # Uses legacy prefix detection
 # tinycoder --model my-custom-ollama-model # Assumes Ollama provider
 

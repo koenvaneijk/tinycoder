@@ -103,7 +103,7 @@ def main():
             else:
                 model_str = model_name
         elif args.provider == "deepseek":
-            model_name = args.model or "deepseek-coder"
+            model_name = args.model or "deepseek-reasoner"
             if not model_name.startswith("deepseek-"):
                 model_str = f"deepseek-{model_name}"
             else:
@@ -117,7 +117,7 @@ def main():
         elif args.provider == "ollama":
             model_str = args.model or "qwen3:14b"
         elif args.provider == "openai":
-            model_name = args.model or "o3-2025-01-24"
+            model_name = args.model or "gpt-5"
             if not model_name.startswith("gpt-") and not model_name.startswith("o3-") and not model_name.startswith("o1-"):
                 model_str = f"openai-{model_name}"
             else:

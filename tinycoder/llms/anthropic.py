@@ -6,7 +6,7 @@ from typing import List, Dict, Optional, Tuple, Any, Generator
 import tinycoder.requests as requests # Use the local requests shim
 from tinycoder.llms.base import LLMClient
 
-DEFAULT_ANTHROPIC_MODEL = "claude-opus-4-20250514"
+DEFAULT_ANTHROPIC_MODEL = "claude-opus-4-1-20250805"
 ANTHROPIC_API_ENDPOINT = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_API_VERSION = "2023-06-01"
 ANTHROPIC_API_KEY_ENV_VAR = "ANTHROPIC_API_KEY"
@@ -97,6 +97,7 @@ class AnthropicClient(LLMClient):
             "model": self.model,
             "messages": formatted_messages,
             "system": system_prompt if system_prompt else None,
+            "max_tokens": 32000
         }
         # Remove system from payload if it's None or empty
         if not payload["system"]:
@@ -193,6 +194,7 @@ class AnthropicClient(LLMClient):
             "messages": formatted_messages,
             "system": system_prompt if system_prompt else None,
             "stream": True,
+            "max_tokens": 32000
         }
         if not payload["system"]:
             del payload["system"]
