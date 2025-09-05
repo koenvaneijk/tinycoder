@@ -765,10 +765,14 @@ def generate_report(
     # Sort alphabetically by the calculated relative path
     file_paths_for_report.sort(key=lambda item: item[0])
 
+    # Build directory tree structure
+    dir_tree = {}
+    file_info_map: Dict[str, Dict] = {}
+    
     for relative_fpath, resolved_fpath in file_paths_for_report:
         executable_lines = all_executable_lines.get(
             resolved_fpath, set()
-        )  # Should always exist here
+        )
         # Filter hits efficiently for the current file
         hit_lines = {lineno for fpath, lineno in all_hits if fpath == resolved_fpath}
 
@@ -782,19 +786,64 @@ def generate_report(
             covered_files_count += 1
 
             coverage_percentage = num_hit / num_executable * 100
-            # Format output neatly
-            formatted_line = f"{relative_fpath:<50} {num_hit:>4}/{num_executable:<4} lines ({coverage_percentage:>6.1f}%)"
-            print(formatted_line)
+            
+            # Build directory tree
+            path_parts = pathlib.Path(relative_fpath).parts
+            current = dir_tree
+            for part in path_parts[:-1]:
+                current = current.setdefault(part, {})
+            current[path_parts[-1]] = {
+                'path': relative_fpath,
+                'coverage': coverage_percentage,
+                'hit': num_hit,
+                'total': num_executable,
+                'missing': sorted(list(executable_lines - hit_lines)) if executable_lines - hit_lines else []
+            }
 
-            # Optional: Show missing lines (can be verbose)
-            missing = sorted(list(executable_lines - hit_lines))
-            if missing:
-                # Format missing lines compactly
-                missing_str = ", ".join(map(str, missing))
-                if len(missing_str) > 80:  # Truncate if too long
-                    missing_str = missing_str[:77] + "..."
-                print(f"  Missing: {missing_str}")
-        # else: # No executable lines, skip report line for this file
+    # ANSI colour helpers
+    def _colour_for(pct: float) -> str:
+        """Return ANSI colour code for coverage percentage."""
+        if pct >= 80.0:
+            return "\033[32m"     # green
+        if pct >= 50.0:
+            return "\033[33m"     # yellow/orange
+        return "\033[31m"         # red
+
+    _RESET = "\033[0m"
+
+    # Pretty tree + table printer
+    def _bar(percentage: float, width: int = 15) -> str:
+        filled = int(width * percentage / 100)
+        return "█" * filled + "░" * (width - filled)
+
+    def _print_coverage_tree(tree: dict, indent: int = 0) -> None:
+        for name, content in sorted(tree.items()):
+            prefix = "  " * indent
+            if isinstance(content, dict) and "path" in content:
+                # It's a file
+                file_data = content
+                pct = file_data["coverage"]
+                col = _colour_for(pct)
+                bar = _bar(pct)
+                line = (f"{prefix}{name:<30} "
+                        f"{col}{bar}\033[0m "
+                        f"{col}{pct:>5.1f}%{_RESET} "
+                        f"({file_data['hit']}/{file_data['total']})")
+                print(line)
+
+                # Show missing lines if any
+                if file_data['missing']:
+                    missing_str = ", ".join(map(str, file_data['missing'][:10]))
+                    if len(file_data['missing']) > 10:
+                        missing_str += f" …({len(file_data['missing'])})"
+                    print(f"{prefix}  Missing: {missing_str}")
+            else:
+                # It's a directory
+                print(f"{prefix}📁 {name}/")
+                _print_coverage_tree(content, indent + 1)
+
+    # Print the tree
+    _print_coverage_tree(dir_tree)
 
     print("-" * 60)
     if total_executable > 0:
