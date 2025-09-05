@@ -4,6 +4,7 @@ from pathlib import Path # Added for globbing
 from typing import TYPE_CHECKING, Callable, Optional, Tuple
 
 from tinycoder.unittest_runner import run_tests
+from tinycoder.coverage_tool import run_coverage_summary
 
 if TYPE_CHECKING:
     from tinycoder.file_manager import FileManager
@@ -288,8 +289,13 @@ class CommandHandler:
                     self.logger.warning("Docker detected, but could not determine a service to run tests in. Running locally.")
                     run_tests(self.write_history_func, self.git_manager)
             else:
-                self.logger.info("No Docker environment detected. Running tests locally.")
                 run_tests(self.write_history_func, self.git_manager)
+            return True, None
+
+        elif command == "/coverage":
+            if args_str:
+                self.logger.warning("/coverage command does not accept arguments.")
+            run_coverage_summary(self.write_history_func, self.git_manager, self.logger)
             return True, None
 
         elif command == "/docker":
@@ -447,6 +453,7 @@ class CommandHandler:
   /ask                        Switch to ASK mode (answer questions, no edits).
   /code                       Switch to CODE mode (make edits).
   /tests                      Run unit tests (runs in container if docker-compose.yml is present).
+  /coverage                   Run coverage summary (unittest discovery; summary per file and total).
   /docker ps                  Show status of Docker containers.
   /docker logs <service>      Stream logs from a Docker container.
   /docker restart <service>   Restart a Docker container.

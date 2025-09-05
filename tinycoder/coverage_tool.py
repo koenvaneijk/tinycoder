@@ -10,7 +10,8 @@ import traceback
 import types
 import unittest
 import collections  # Added for defaultdict
-from typing import Dict, List, Optional, Set, Tuple
+import io
+from typing import Dict, List, Optional, Set, Tuple, Callable
 
 # --- Configuration ---
 # Directories relative to the script's execution location
@@ -1265,6 +1266,129 @@ def get_uncovered_code_context(root_dir: str = ".") -> str:
     # Join all collected lines (file headers, scope headers, code lines, errors) into the final string
     # Use strip() to remove leading/trailing whitespace, especially the final blank line.
     return "\n".join(context_lines).strip()
+
+
+def run_coverage_summary(
+    write_history_func: Callable[[str, str], None],
+    git_manager: Optional[object],
+    logger
+) -> None:
+    """
+    Run coverage using unittest discovery from unittest_runner, and print a concise summary:
+      - One line per source file: percent, covered/total, and missing count.
+      - Final total across all files.
+    """
+    # Resolve project root (prefer Git root)
+    if git_manager and hasattr(git_manager, "is_repo") and git_manager.is_repo():
+        root_dir_str = getattr(git_manager, "get_root", lambda: None)()
+        root_dir = pathlib.Path(root_dir_str) if root_dir_str else pathlib.Path.cwd()
+        if not root_dir_str:
+            logger.info(f"Falling back to current working directory: {root_dir}")
+    else:
+        root_dir = pathlib.Path.cwd()
+        logger.info(f"Not in a Git repository. Using current working directory as project root: {root_dir}")
+
+    # Discover source files to instrument (tests are excluded by EXCLUDE_DIRS)
+    target_files = find_target_files(str(root_dir))
+    if not target_files:
+        logger.info("Coverage: No source files found to instrument.")
+        write_history_func("tool", "Coverage: No source files found.")
+        return
+
+    # Process files to get executable lines and instrumented source
+    all_executable_lines: Dict[str, Set[int]] = {}
+    instrumented_sources: Dict[str, str] = {}
+    for fpath in target_files:
+        exec_lines, instrumented_src = process_file(fpath)
+        if exec_lines or instrumented_src is not None:
+            all_executable_lines[fpath] = exec_lines
+        if instrumented_src is not None:
+            instrumented_sources[fpath] = instrumented_src
+
+    if not instrumented_sources:
+        logger.error("Coverage: No source files could be successfully instrumented.")
+        write_history_func("tool", "Coverage: Instrumentation failed for all files.")
+        return
+
+    tracker = CoverageTracker()
+    hook = CoverageImportHook(instrumented_sources, tracker)
+
+    # Install import hook
+    sys.meta_path.insert(0, hook)
+
+    # Build unittest suite using shared discovery logic
+    from tinycoder.unittest_runner import _find_test_start_dirs  # local import to avoid cycles
+    loader = unittest.TestLoader()
+    master_suite = unittest.TestSuite()
+
+    original_sys_path = list(sys.path)
+    try:
+        if str(root_dir) not in sys.path:
+            sys.path.insert(0, str(root_dir))
+
+        start_dirs = _find_test_start_dirs(root_dir)
+        if not start_dirs:
+            logger.info("Coverage: No test_*.py files found (will report 0% coverage).")
+
+        for start_dir in start_dirs:
+            try:
+                suite = loader.discover(
+                    start_dir=str(start_dir),
+                    pattern="test_*.py",
+                    top_level_dir=str(root_dir),
+                )
+                master_suite.addTests(suite)
+            except Exception:
+                logger.exception(f"Coverage: Error during test discovery in '{start_dir}'. Continuing.")
+    finally:
+        # Restore sys.path
+        sys.path = original_sys_path
+
+    # Run tests (buffered to suppress normal output)
+    stream = io.StringIO()
+    runner = unittest.TextTestRunner(stream=stream, verbosity=0, buffer=True)
+    try:
+        runner.run(master_suite)
+    finally:
+        # Remove import hook
+        sys.meta_path = [m for m in sys.meta_path if m is not hook]
+
+    # Compute per-file and overall coverage
+    rows: List[Tuple[str, float, int, int, int]] = []
+    total_exec = 0
+    total_cov = 0
+
+    for f in sorted(instrumented_sources.keys()):
+        exec_lines = all_executable_lines.get(f, set())
+        if not exec_lines:
+            continue
+        covered_lines = {lineno for (fpath, lineno) in tracker.hits if fpath == f}
+        covered = len(exec_lines & covered_lines)
+        total = len(exec_lines)
+        missing = total - covered
+        pct = (100.0 * covered / total) if total else 100.0
+        total_exec += total
+        total_cov += covered
+        rows.append((f, pct, covered, total, missing))
+
+    # Log summary
+    logger.info("--- Coverage Summary ---")
+    for f, pct, covered, total, missing in rows:
+        try:
+            rel = str(pathlib.Path(f).resolve().relative_to(root_dir.resolve()))
+        except Exception:
+            rel = f
+        logger.info(f"- {rel}: {pct:.1f}% ({covered}/{total}, missing {missing})")
+
+    overall_pct = (100.0 * total_cov / total_exec) if total_exec else 100.0
+    logger.info("-" * 60)
+    logger.info(f"Total: {overall_pct:.1f}% ({total_cov}/{total_exec}, missing {total_exec - total_cov if total_exec else 0})")
+
+    # Write a compact summary to chat history
+    write_history_func(
+        "tool",
+        f"Coverage: {overall_pct:.1f}% ({total_cov}/{total_exec} lines covered across {len(rows)} file(s))"
+    )
 
 
 # --- Main Execution ---
