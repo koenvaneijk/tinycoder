@@ -2,9 +2,12 @@ import io
 import logging
 import os
 import sys
+import time
 import unittest
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Optional, List, Set
+from typing import TYPE_CHECKING, Callable, Optional, List, Set, Tuple
+
+from tinycoder.ui.log_formatter import COLORS, RESET
 
 if TYPE_CHECKING:
     from tinycoder.git_manager import GitManager
@@ -58,6 +61,16 @@ def _find_test_start_dirs(root_dir: Path) -> List[Path]:
             unique_dirs.append(d)
     return unique_dirs
 
+def _format_test_id(test: unittest.case.TestCase) -> str:
+    try:
+        return test.id()
+    except Exception:
+        return str(test)
+
+def _color(name: str) -> str:
+    # Gracefully handle if COLORS is missing a key
+    return COLORS.get(name, "")
+
 def run_tests(
     write_history_func: Callable[[str, str], None],
     git_manager: Optional["GitManager"],
@@ -67,9 +80,14 @@ def run_tests(
       - tests located in the conventional ./tests directory, and
       - tests colocated with code (e.g., pkg/module/test_*.py or pkg/test_module.py),
     while skipping common non-source directories (venv, .git, build, dist, etc.).
+
+    Output formatting:
+      - If all tests pass: print a single concise green line with a checkmark.
+      - If failures/errors exist: print a compact summary and only the failing/erroring tests
+        with their tracebacks. Use colors, emojis, and separators for readability.
     """
     logger = logging.getLogger(__name__)
-    logger.info("Running tests...")
+    logger.info("🧪 Running tests...")
 
     # Determine the root directory (Git root if available, else CWD)
     root_dir: Optional[Path] = None
@@ -131,22 +149,88 @@ def run_tests(
         write_history_func("tool", "Test run complete: No tests found.")
         return
 
-    # Run tests and capture output
+    # Run tests with buffered output so only failing tests show captured stdout/stderr
     stream = io.StringIO()
-    runner = unittest.TextTestRunner(stream=stream, verbosity=2)
+    runner = unittest.TextTestRunner(stream=stream, verbosity=0, buffer=True)
+    t0 = time.perf_counter()
     result = runner.run(master_suite)
+    duration_s = time.perf_counter() - t0
 
-    output = stream.getvalue()
-    stream.close()
+    # Build concise summary
+    failures: List[Tuple[unittest.case.TestCase, str]] = result.failures
+    errors: List[Tuple[unittest.case.TestCase, str]] = result.errors
+    skipped_list = getattr(result, "skipped", [])
+    expected_failures_list = getattr(result, "expectedFailures", [])
+    unexpected_successes_list = getattr(result, "unexpectedSuccesses", [])
+
+    failures_count = len(failures)
+    errors_count = len(errors)
+    skipped_count = len(skipped_list)
+    expected_failures_count = len(expected_failures_list)
+    unexpected_successes_count = len(unexpected_successes_list)
+    passed_count = (
+        result.testsRun
+        - failures_count
+        - errors_count
+        - skipped_count
+        - expected_failures_count
+    )
+
+    green = _color("green")
+    red = _color("red")
+    yellow = _color("yellow")
+    cyan = _color("cyan")
+    bold = _color("bold")
+    reset = RESET
+    sep = "-" * 70
 
     if result.wasSuccessful():
-        logger.info(f"Test Results:\n{output}")
-        write_history_func("tool", f"Tests run successfully ({result.testsRun} tests).")
-    else:
-        logger.error(f"Test Results:\n{output}")
-        errors_count = len(result.errors)
-        failures_count = len(result.failures)
-        write_history_func(
-            "tool",
-            f"Tests run with {errors_count} errors and {failures_count} failures ({result.testsRun} total tests).",
-        )
+        msg = f"✅ {bold}{green}{passed_count} tests passed{reset} ⏱️ {duration_s:.2f}s"
+        if skipped_count:
+            msg += f"  |  {yellow}{skipped_count} skipped{reset}"
+        logger.info(msg)
+        write_history_func("tool", f"✅ {passed_count} tests passed in {duration_s:.2f}s" + (f" ({skipped_count} skipped)" if skipped_count else ""))
+        return
+
+    # Failures/errors present – show only those
+    header = (
+        f"❌ {bold}{red}Test failures detected{reset} "
+        f"(total={result.testsRun}, {failures_count} failures, {errors_count} errors, "
+        f"{skipped_count} skipped, {unexpected_successes_count} unexpected successes) "
+        f"⏱️ {duration_s:.2f}s"
+    )
+    logger.error(header)
+    logger.error(sep)
+
+    def _print_section(title: str, items: List[Tuple[unittest.case.TestCase, str]]) -> None:
+        if not items:
+            return
+        logger.error(f"{bold}{title}{reset} ({len(items)}):")
+        for test, tb in items:
+            test_name = _format_test_id(test)
+            logger.error(f"{cyan}{test_name}{reset}")
+            # Truncate very long tracebacks
+            lines = tb.rstrip().splitlines()
+            if len(lines) > 200:
+                tb_display = "\n".join(lines[-120:])
+                logger.error("(traceback truncated to last 120 lines)")
+            else:
+                tb_display = tb
+            logger.error(tb_display)
+            logger.error(sep)
+
+    _print_section("FAILURES", failures)
+    _print_section("ERRORS", errors)
+
+    tail_summary = (
+        f"⚠️  Summary: {failures_count} failure(s), {errors_count} error(s), "
+        f"{skipped_count} skipped, {unexpected_successes_count} unexpected success(es)."
+    )
+    logger.error(tail_summary)
+
+    # Write a compact summary to history (details stay in logs)
+    write_history_func(
+        "tool",
+        f"❌ Tests run with {errors_count} error(s) and {failures_count} failure(s) "
+        f"({result.testsRun} total, {skipped_count} skipped) in {duration_s:.2f}s.",
+    )

@@ -246,10 +246,8 @@ class CommandHandler:
             if args_str:
                 # Log a truncated version of the prompt if it's long
                 prompt_preview = args_str[:50] + ('...' if len(args_str) > 50 else '')
-                self.logger.info(f"Switched to ASK mode. Processing prompt: \"{prompt_preview}\"")
                 return True, args_str  # Pass args_str as immediate_prompt_arg
             else:
-                self.logger.info("Switched to ASK mode. I will answer questions but not edit files.")
                 return True, None
 
         elif command == "/code":
@@ -257,10 +255,8 @@ class CommandHandler:
             if args_str:
                 # Log a truncated version of the prompt if it's long
                 prompt_preview = args_str[:50] + ('...' if len(args_str) > 50 else '')
-                self.logger.info(f"Switched to CODE mode. Processing prompt: \"{prompt_preview}\"")
                 return True, args_str  # Pass args_str as immediate_prompt_arg
             else:
-                self.logger.info("Switched to CODE mode. I will try to edit files.")
                 return True, None
         
         elif command == "/suggest_files":
@@ -285,8 +281,8 @@ class CommandHandler:
                 
                 if service_to_test:
                     self.logger.info(f"Docker detected. Running tests in '{service_to_test}' service...")
-                    # Common test commands, try pytest first
-                    test_command_to_run = "pytest" 
+                    # Prefer concise pytest output in containers: quiet, show only failures/errors, force color
+                    test_command_to_run = "pytest -q -r fE --color=yes"
                     self.docker_manager.run_command_in_service(service_to_test, test_command_to_run)
                 else:
                     self.logger.warning("Docker detected, but could not determine a service to run tests in. Running locally.")
