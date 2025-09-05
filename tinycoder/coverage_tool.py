@@ -11,6 +11,8 @@ import collections
 import io
 from typing import Dict, List, Optional, Set, Tuple, Callable
 
+import logging
+
 TEST_DIR = "./tests"
 TEST_FILE_PATTERN = "test_*.py"
 TARGET_FILE_SUFFIX = ".py"
@@ -488,9 +490,9 @@ def find_target_files(root_dir: str) -> List[str]:
         )
         return []
 
-    print(f"Scanning for Python files in: {root_path}")
-    print(f"Excluding directories (during walk): {EXCLUDE_DIRS}")
-    print(f"Excluding filenames (during check): {EXCLUDE_FILENAMES}")
+    logging.debug(f"Scanning for Python files in: {root_path}")
+    logging.debug(f"Excluding directories (during walk): {EXCLUDE_DIRS}")
+    logging.debug(f"Excluding filenames (during check): {EXCLUDE_FILENAMES}")
 
     try:
         # os.walk is efficient for traversing directories and allows pruning
