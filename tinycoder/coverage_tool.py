@@ -1201,6 +1201,21 @@ def run_coverage_summary(
         total_cov += covered
         rows.append((f, pct, covered, total, missing))
 
+    # ANSI colour helpers
+    def _colour_for(pct: float) -> str:
+        """Return ANSI colour code for coverage percentage."""
+        if pct >= 80.0:
+            return "\033[32m"     # green
+        if pct >= 50.0:
+            return "\033[33m"     # yellow/orange
+        return "\033[31m"         # red
+
+    _RESET = "\033[0m"
+
+    def _bar(percentage: float, width: int = 15) -> str:
+        filled = int(width * percentage / 100)
+        return "█" * filled + "░" * (width - filled)
+
     # Log summary
     logger.info("--- Coverage Summary ---")
     for f, pct, covered, total, missing in rows:
@@ -1208,7 +1223,9 @@ def run_coverage_summary(
             rel = str(pathlib.Path(f).resolve().relative_to(root_dir.resolve()))
         except Exception:
             rel = f
-        logger.info(f"- {rel}: {pct:.1f}% ({covered}/{total}, missing {missing})")
+        col = _colour_for(pct)
+        bar = _bar(pct)
+        logger.info(f"{col}{bar}\033[0m {rel}: {col}{pct:.1f}%{_RESET} ({covered}/{total}, missing {missing})")
 
     overall_pct = (100.0 * total_cov / total_exec) if total_exec else 100.0
     logger.info("-" * 60)
