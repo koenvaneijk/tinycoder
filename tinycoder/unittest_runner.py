@@ -1,30 +1,77 @@
 import io
 import logging
+import os
 import sys
 import unittest
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Optional
+from typing import TYPE_CHECKING, Callable, Optional, List, Set
 
 if TYPE_CHECKING:
     from tinycoder.git_manager import GitManager
+
+# Common directories to exclude from test discovery
+EXCLUDED_DIR_NAMES: Set[str] = {
+    ".git",
+    ".hg",
+    ".svn",
+    ".tox",
+    ".venv",
+    "venv",
+    "env",
+    "__pycache__",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".idea",
+    ".vscode",
+    ".eggs",
+    "build",
+    "dist",
+    "node_modules",
+}
+
+def _find_test_start_dirs(root_dir: Path) -> List[Path]:
+    """
+    Walk the project tree and return a minimal set of directories to start unittest discovery from.
+    A directory is included if it contains at least one test_*.py file. We prune excluded dirs, and
+    once we include a directory, we do not descend into it further to avoid duplicate discovery.
+    """
+    start_dirs: List[Path] = []
+
+    for current_dir, dirs, files in os.walk(root_dir, topdown=True):
+        # Prune excluded directories
+        dirs[:] = [d for d in dirs if d not in EXCLUDED_DIR_NAMES]
+
+        has_tests_here = any(f.startswith("test_") and f.endswith(".py") for f in files)
+        if has_tests_here:
+            start_dirs.append(Path(current_dir))
+            # Prevent descending; discovery from this dir will handle subdirs
+            dirs[:] = []
+
+    # Deduplicate while preserving order
+    seen: Set[Path] = set()
+    unique_dirs: List[Path] = []
+    for d in start_dirs:
+        rp = d.resolve()
+        if rp not in seen:
+            seen.add(rp)
+            unique_dirs.append(d)
+    return unique_dirs
 
 def run_tests(
     write_history_func: Callable[[str, str], None],
     git_manager: Optional["GitManager"],
 ) -> None:
     """
-    Discovers and runs unit tests in the ./tests directory relative to the project root.
-
-    Args:
-        write_history_func: Function to record tool output in chat history.
-        git_manager: The GitManager instance to find the repository root.
-        logger: Optional logger instance. If None, a default logger is used.
+    Discovers and runs unit tests across the project:
+      - tests located in the conventional ./tests directory, and
+      - tests colocated with code (e.g., pkg/module/test_*.py or pkg/test_module.py),
+    while skipping common non-source directories (venv, .git, build, dist, etc.).
     """
     logger = logging.getLogger(__name__)
     logger.info("Running tests...")
 
     # Determine the root directory (Git root if available, else CWD)
-    test_dir_rel = "tests"
     root_dir: Optional[Path] = None
     if git_manager and git_manager.is_repo():
         root_dir_str = git_manager.get_root()
@@ -32,77 +79,66 @@ def run_tests(
             root_dir = Path(root_dir_str)
             logger.info(f"Using Git repository root: {root_dir}")
         else:
-            # Should not happen if is_repo() is true, but handle defensively
-            logger.error(
-                "Could not determine Git repository root despite being in a repo."
-            )
+            logger.error("Could not determine Git repository root despite being in a repo.")
             root_dir = Path.cwd()
             logger.info(f"Falling back to current working directory: {root_dir}")
-
     else:
-        # Fallback to current working directory if not in a git repo or git_manager is None/not repo
         root_dir = Path.cwd()
-        logger.info(
-            f"Not in a Git repository. Using current working directory as project root: {root_dir}"
-        )
+        logger.info(f"Not in a Git repository. Using current working directory as project root: {root_dir}")
 
-    if not root_dir:  # Should be set by now, but check again
+    if not root_dir:
         logger.error("Failed to determine project root directory.")
         return
 
-    test_dir_abs = root_dir / test_dir_rel
-
-    if not test_dir_abs.is_dir():
-        logger.error(f"Test directory '{test_dir_abs}' not found.")
-        return
-
-    # Discover tests
+    # Discover tests in multiple locations (tests directory and alongside code)
     loader = unittest.TestLoader()
-    original_sys_path = list(sys.path)  # Store original path
-    suite = None
+    master_suite = unittest.TestSuite()
+    original_sys_path = list(sys.path)
+
     try:
-        # Add root_dir to sys.path temporarily for imports
+        # Ensure project root is importable
         if str(root_dir) not in sys.path:
             sys.path.insert(0, str(root_dir))
 
-        logger.info(
-            f"Discovering tests in: {test_dir_abs} (pattern: test_*.py, top_level: {root_dir})"
-        )
-        suite = loader.discover(
-            start_dir=str(test_dir_abs),
-            pattern="test_*.py",
-            top_level_dir=str(root_dir),
-        )
+        start_dirs = _find_test_start_dirs(root_dir)
+        if not start_dirs:
+            logger.info("No test_*.py files found in project (after excluding common directories).")
+            write_history_func("tool", "Test run complete: No tests found.")
+            return
 
-    except ImportError as e:
-        logger.error(f"Error during test discovery: {e}")
-        logger.error(
-            f"Ensure that '{root_dir}' or its relevant subdirectories are importable (e.g., check __init__.py files or PYTHONPATH)."
-        )
-        return  # Exit if discovery fails
-    except Exception as e:
-        logger.exception("An unexpected error occurred during test discovery.") # Use logger.exception for better traceback
-        return  # Exit if discovery fails
+        # Log discovered start directories (relative to root)
+        rel_dirs = [str(Path(d).resolve().relative_to(root_dir.resolve())) or "." for d in start_dirs]
+        logger.info("Discovering tests in the following directories (pattern: test_*.py):\n- " + "\n- ".join(rel_dirs))
+
+        for start_dir in start_dirs:
+            try:
+                suite = loader.discover(
+                    start_dir=str(start_dir),
+                    pattern="test_*.py",
+                    top_level_dir=str(root_dir),
+                )
+                master_suite.addTests(suite)
+            except Exception:
+                logger.exception(f"An error occurred during test discovery in '{start_dir}'. Continuing with other directories.")
+
     finally:
         # Restore original sys.path regardless of success or failure
         sys.path = original_sys_path
 
-    if not suite or suite.countTestCases() == 0:
-        logger.info(f"No tests found in '{test_dir_abs}' matching 'test_*.py'.")
-        # Write history even if no tests found
+    total_tests = master_suite.countTestCases()
+    if total_tests == 0:
+        logger.info("No tests collected after discovery.")
         write_history_func("tool", "Test run complete: No tests found.")
         return
 
     # Run tests and capture output
     stream = io.StringIO()
     runner = unittest.TextTestRunner(stream=stream, verbosity=2)
-    result = runner.run(suite)
+    result = runner.run(master_suite)
 
-    # Print the output
     output = stream.getvalue()
     stream.close()
 
-    # Determine logging level based on test results
     if result.wasSuccessful():
         logger.info(f"Test Results:\n{output}")
         write_history_func("tool", f"Tests run successfully ({result.testsRun} tests).")
