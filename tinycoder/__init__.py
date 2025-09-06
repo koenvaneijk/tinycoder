@@ -2,11 +2,16 @@ from tinycoder.app import App
 import os
 import argparse
 import asyncio
+import importlib.metadata
 
 from tinycoder.preferences import save_user_preference, load_user_preference_model
 from tinycoder.ui.log_formatter import COLORS, RESET
 
 APP_NAME = "tinycoder"
+try:
+    __version__ = importlib.metadata.version(APP_NAME)
+except importlib.metadata.PackageNotFoundError:
+    __version__ = "dev"
 
 def main():
     ascii_art_lines = [
@@ -29,6 +34,11 @@ def main():
     for i, line in enumerate(ascii_art_lines):
         color = gradient_colors[i % len(gradient_colors)] # Cycle through colors
         print(f"{color}{line}{RESET}")
+
+    version_color = COLORS.get("YELLOW", "")
+    version_str = f"v{__version__}"
+    art_width = max(len(line) for line in ascii_art_lines)
+    print(f"{version_color}{version_str: >{art_width}}{RESET}")
     print() # Add an extra newline for spacing after the art
 
     # Get default provider and model from environment variables
