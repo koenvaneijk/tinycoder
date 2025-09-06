@@ -165,7 +165,7 @@ class App:
             self.docker_manager: Optional[DockerManager] = DockerManager(project_root, self.logger)
             if not self.docker_manager.is_available:
                 self.docker_manager = None # Ensure it's None if not fully available
-                self.logger.info("Docker integration disabled.")
+                self.logger.debug("Docker integration disabled.")
             else:
                 self.logger.debug("DockerManager initialized successfully.")
         except Exception as e:

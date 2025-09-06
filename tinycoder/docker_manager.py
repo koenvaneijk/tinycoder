@@ -65,11 +65,30 @@ class DockerManager:
             return False, "", str(e)
 
     def _check_docker_availability(self) -> bool:
-        """Checks if the Docker daemon is running."""
-        success, _, stderr = self._run_command(['docker', 'info'])
-        if "Cannot connect to the Docker daemon" in stderr:
+        """
+        Checks if the Docker command is available and the daemon is running.
+        Handles FileNotFoundError gracefully for when docker is not installed.
+        """
+        try:
+            process = subprocess.run(
+                ['docker', 'info'],
+                capture_output=True,
+                text=True,
+                check=False,
+                cwd=str(self.root_dir) if self.root_dir else None,
+            )
+            # This error means the daemon is not running.
+            if "Cannot connect to the Docker daemon" in process.stderr:
+                return False
+            # Any other non-zero return code is also a failure.
+            return process.returncode == 0
+        except FileNotFoundError:
+            # This means the 'docker' command itself was not found.
             return False
-        return success
+        except Exception as e:
+            # Log other unexpected errors at debug level.
+            self.logger.debug(f"An unexpected error occurred while checking for Docker: {e}")
+            return False
 
     def _parse_compose_file(self):
         """Parses the docker-compose.yml file using a pure Python parser."""
