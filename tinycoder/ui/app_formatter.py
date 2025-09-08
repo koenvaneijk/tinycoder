@@ -27,7 +27,6 @@ class AppFormatter:
         """
         Generates the plain text for the bottom toolbar from cached token context.
         This function must be extremely fast as it's called on every redraw.
-        Note: prompt_toolkit applies styling based on CSS classes in the returned string.
         """
         total = token_breakdown.get("total", 0)
         
@@ -38,20 +37,14 @@ class AppFormatter:
         elif total > 15000:
             total_color_class = 'class:bottom-toolbar.medium'
         
-        # Full word descriptions, single style for most text
-        parts = [
-            ('class:bottom-toolbar', '  Context: '),
-            (total_color_class, f'{total:,}'),
-            ('class:bottom-toolbar', f" (Prompt: {token_breakdown.get('prompt_rules', 0):,} | "),
-            ('class:bottom-toolbar', f"Map: {token_breakdown.get('repo_map', 0):,} | "),
-            ('class:bottom-toolbar', f"Files: {token_breakdown.get('files', 0):,} | "),
-            ('class:bottom-toolbar', f"History: {token_breakdown.get('history', 0):,})  "),
-        ]
-
-        # Build plain string with CSS class annotations for prompt_toolkit styling
-        toolbar_str = ""
-        for cls, text in parts:
-            toolbar_str += f"[{cls}]{text}"
+        # Build plain string
+        toolbar_str = (
+            f"  Context: {total:,}"
+            f" (Prompt: {token_breakdown.get('prompt_rules', 0):,} | "
+            f"Map: {token_breakdown.get('repo_map', 0):,} | "
+            f"Files: {token_breakdown.get('files', 0):,} | "
+            f"History: {token_breakdown.get('history', 0):,})  "
+        )
         return toolbar_str
     
     def format_mode_prompt(self, mode: str) -> FormattedText:

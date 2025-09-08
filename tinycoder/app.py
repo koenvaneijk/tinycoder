@@ -279,7 +279,6 @@ class App:
         
         # Create multi-line toolbar with files on top line and tokens below
         toolbar_text = f"{files_str}\n{self.formatter.format_bottom_toolbar(breakdown)}"
-        # Return plain string, prompt_toolkit will handle the styling via toolbar styles
         return toolbar_text
 
     def _update_and_cache_token_breakdown(self) -> None:
