@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from typing import List, Set, Dict, Optional
+from typing import List, Set, Dict
 
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.styles import Style

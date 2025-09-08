@@ -13,7 +13,6 @@ from prompt_toolkit.utils import get_cwidth
 
 from tinycoder.llms.base import LLMClient
 from tinycoder.llms.pricing import get_model_pricing
-from tinycoder.ui.log_formatter import STYLES, COLORS as FmtColors, RESET
 
 
 class LLMResponseProcessor:

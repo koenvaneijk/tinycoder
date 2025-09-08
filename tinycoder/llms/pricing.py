@@ -71,7 +71,7 @@ PRICING_DATA: Dict[str, List[Dict[str, Any]]] = {
           "output_price_per_million_tokens": 0.60
         },
         {
-          "model_id": "kimi-k2-0905-1t",
+          "model_id": "moonshotai/kimi-k2-instruct-0905",
           "input_price_per_million_tokens": 1.00,
           "output_price_per_million_tokens": 3.00
         },
