@@ -263,7 +263,7 @@ class App:
         return cleaned_response.strip()
 
 
-    def _get_bottom_toolbar_tokens(self) -> FormattedText:
+    def _get_bottom_toolbar_tokens(self):
         """
         Generates the formatted text for the bottom toolbar from cached token context.
         This function must be extremely fast as it's called on every redraw.
@@ -278,11 +278,8 @@ class App:
             files_str = "Files: none"
         
         # Create multi-line toolbar with files on top line and tokens below
-        return FormattedText([
-            ('class:bottom-toolbar', files_str),
-            ('class:bottom-toolbar', '\n'),
-            ('class:bottom-toolbar', self.formatter.format_bottom_toolbar(breakdown)),
-        ])
+        toolbar_text = f"{files_str}\n{self.formatter.format_bottom_toolbar(breakdown)}"
+        return toolbar_text
 
     def _update_and_cache_token_breakdown(self) -> None:
         """
