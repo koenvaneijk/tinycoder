@@ -747,8 +747,14 @@ class App:
         Processes a single user message, including potential reflection loops in interactive mode.
         """
         self.init_before_message()
-        if preproc and await self._maybe_handle_special_input(user_message):
-            return True
+        if preproc:
+            handled = await self._maybe_handle_special_input(user_message)
+            if handled:
+                return True
+            # Check if this was an exit command that returned False
+            if user_message.startswith("/"):
+                # Command was handled but returned False (exit signal)
+                return False
 
         # Ensure the message is added to history before any LLM processing
         self.history_manager.add_message("user", user_message)
