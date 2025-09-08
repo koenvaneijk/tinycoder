@@ -5,6 +5,7 @@ from typing import Optional, Set, Callable
 
 from tinycoder.notebook_converter import ipynb_to_py, py_to_ipynb
 from tinycoder.ui.console_interface import ring_bell
+from tinycoder.ui.log_formatter import COLORS, RESET
 
 # A set of common directory names to exclude from being added to the context.
 DEFAULT_EXCLUDED_DIRS = {
@@ -118,32 +119,32 @@ class FileManager:
         # === Exclusion Checks (only run if force=False) ===
         if not force:
             if self._is_path_excluded_by_dir(abs_path):
-                self.logger.info(f"Skipping file in excluded directory: {rel_path}")
+                self.logger.info(f"Skipping file in excluded directory: {COLORS['CYAN']}{rel_path}{RESET}")
                 return False
             # The binary check requires file I/O, so check if it exists first
             if abs_path.exists() and self._is_binary_file(abs_path):
-                self.logger.info(f"Skipping binary file: {rel_path}")
+                self.logger.info(f"Skipping binary file: {COLORS['CYAN']}{rel_path}{RESET}")
                 return False
         # === End of Exclusion Checks ===
 
         if not abs_path.exists():
             ring_bell()
             create = self.io_input(
-                f"FILE: '{rel_path}' does not exist. Create it? (y/N): "
+                f"FILE: '{COLORS['CYAN']}{rel_path}{RESET}' does not exist. Create it? (y/N): "
             )
             if create.startswith("y"):
                 if not self.create_file(abs_path):
                     return False
             else:
-                self.logger.info(f"File creation declined by user: {rel_path}")
+                self.logger.info(f"File creation declined by user: {COLORS['CYAN']}{rel_path}{RESET}")
                 return False
 
         if rel_path in self.fnames:
-            self.logger.info(f"File {rel_path} is already in the chat context.")
+            self.logger.info(f"File {COLORS['CYAN']}{rel_path}{RESET} is already in the chat context.")
             return True
         else:
             self.fnames.add(rel_path)
-            self.logger.info(f"Added {rel_path} to the chat context.")
+            self.logger.info(f"Added {COLORS['CYAN']}{rel_path}{RESET} to the chat context.")
             return True
 
     def drop_file(self, fname: str) -> bool:
@@ -165,11 +166,11 @@ class FileManager:
 
         if path_to_remove:
             self.fnames.remove(path_to_remove)
-            self.logger.info(f"Removed {path_to_remove} from the chat context.")
+            self.logger.info(f"Removed {COLORS['CYAN']}{path_to_remove}{RESET} from the chat context.")
             # Note: History writing is handled by the caller (tinycoder)
             return True # Successfully removed
         else:
-            self.logger.error(f"File {fname} not found in chat context for removal.")
+            self.logger.error(f"File {COLORS['CYAN']}{fname}{RESET} not found in chat context for removal.")
             return False # Not found or other error
 
     def get_files(self) -> Set[str]:
@@ -360,7 +361,7 @@ class FileManager:
                             chunk = f_bin.read(1024)
                         if b"\0" in chunk:
                             self.logger.warning(
-                                f"File {fname} appears to be a generic binary file, omitting content for LLM."
+                                f"File {COLORS['CYAN']}{fname}{RESET} appears to be a generic binary file, omitting content for LLM."
                             )
                             all_content.append(
                                 file_prefix + "(Binary file content omitted)" + file_suffix

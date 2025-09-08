@@ -88,7 +88,7 @@ class EditParser:
                 )
                 malformed_match = malformed_replace_pattern.search(edit_tag_content)
                 if malformed_match:
-                    self.logger.warning(
+                    self.logger.debug(
                         f"Detected malformed <replace> block closed with </find> in edit for '{path_attr}'. "
                         "Attempting to parse anyway."
                     )

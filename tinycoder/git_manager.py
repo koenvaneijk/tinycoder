@@ -187,9 +187,6 @@ class GitManager:
                  self.logger.error(f"{COLORS['RED']}Failed to set global git config {config_key}: {stderr_set}{RESET}")
                  # Continue trying to set others if needed, but log the error
 
-    def get_last_commit_hash(self) -> Optional[str]:
-        return self.git_root
-
     def get_tracked_files_relative(self) -> List[str]:
         """Gets a list of all files currently tracked by git, relative to the repo root."""
         if not self.is_repo():

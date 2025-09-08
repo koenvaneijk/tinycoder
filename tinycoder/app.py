@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 from typing import List, Set, Dict, Optional
 
 from prompt_toolkit import PromptSession
-from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.styles import Style
 
 from tinycoder.chat_history import ChatHistoryManager
@@ -22,7 +21,6 @@ from tinycoder.repo_map import RepoMap
 from tinycoder.rule_manager import RuleManager
 from tinycoder.shell_executor import ShellExecutor
 from tinycoder.ui.console_interface import ring_bell, prompt_user_input
-from tinycoder.ui.log_formatter import STYLES
 from tinycoder.ui.session_summary import format_session_summary
 from tinycoder.ui.app_formatter import AppFormatter
 from tinycoder.docker_manager import DockerManager
