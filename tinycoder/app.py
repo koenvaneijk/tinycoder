@@ -21,7 +21,7 @@ from tinycoder.file_manager import FileManager
 from tinycoder.git_manager import GitManager
 from tinycoder.input_preprocessor import InputPreprocessor
 from tinycoder.llms.base import LLMClient
-from tinycoder.llms.pricing import get_model_pricing
+from tinycoder.llm_response_processor import LLMResponseProcessor
 from tinycoder.prompt_builder import PromptBuilder
 from tinycoder.repo_map import RepoMap
 from tinycoder.rule_manager import RuleManager
@@ -84,6 +84,14 @@ class App:
         self.shell_executor = shell_executor
         self.prompt_session = prompt_session
         self.style = style
+
+        # Initialize LLM response processor
+        self.llm_processor = LLMResponseProcessor(
+            client=self.client,
+            model=self.model,
+            style=self.style,
+            logger=self.logger
+        )
 
         # Initialize components that depend on the App instance (`self`)
         self._init_command_handler()
@@ -494,174 +502,8 @@ class App:
             final_messages.append(msg)
             last_role = msg["role"]
 
-        try:
-            # --- Use the selected LLM client ---
-            # The client interface expects system_prompt and history separately.
-            system_prompt_text = ""
-            history_to_send = []
-
-            # Extract system prompt if present
-            if final_messages and final_messages[0]["role"] == "system":
-                system_prompt_text = final_messages[0]["content"]
-                history_to_send = final_messages[
-                    1:
-                ]  # Exclude system prompt from history
-            else:
-                # If no system prompt was built (e.g., empty history?), send history as is
-                history_to_send = final_messages
-                self.logger.warning(
-                    "System prompt not found at the beginning of messages for LLM."
-                )
-
-            input_chars = sum(len(msg["content"]) for msg in history_to_send) + len(system_prompt_text)
-            input_tokens = round(input_chars / 4)
-            self.state.total_input_tokens += input_tokens
-            
-            self.logger.debug(f"Approx. input tokens to send: {input_tokens}")
-
-            response_content = None
-            error_message = None
-
-            # Check for streaming capability
-            if self.state.use_streaming and hasattr(self.client, 'generate_content_stream'):
-                assistant_header = [('class:assistant.header', 'ASSISTANT'), ('', ':\n')]
-                print_formatted_text(FormattedText(assistant_header), style=self.style)
-                
-                full_response_chunks = []
-                try:
-                    stream = self.client.generate_content_stream(
-                        system_prompt=system_prompt_text, history=history_to_send
-                    )
-                    for chunk in stream:
-                        if "STREAMING_ERROR:" in chunk:
-                            error_message = chunk.replace("STREAMING_ERROR:", "").strip()
-                            break
-                        
-                        # Use print_formatted_text to be safe with prompt_toolkit rendering
-                        print_formatted_text(chunk, end='')
-                        sys.stdout.flush() # Ensure chunks are displayed immediately
-                        full_response_chunks.append(chunk)
-                    
-                    if not error_message:
-                        response_content = "".join(full_response_chunks)
-
-                        # --- Re-render with formatting if applicable ---
-                        is_markdown_candidate = self.state.mode == "ask" and response_content and not response_content.strip().startswith("<")
-                        
-                        if is_markdown_candidate:
-                            try:
-                                # Attempt to replace streamed raw output with formatted output
-                                try:
-                                    width = get_app().output.get_size().columns
-                                except Exception:
-                                    width = os.get_terminal_size().columns
-                                
-                                # Calculate lines for the streamed content
-                                content_lines_count = 0
-                                if response_content:
-                                    # Start with 1 line if there's any content
-                                    content_lines_count = 1
-                                    current_line_length = 0
-                                    for char in response_content:
-                                        if char == '\n':
-                                            content_lines_count += 1
-                                            current_line_length = 0
-                                        else:
-                                            char_width = get_cwidth(char)
-                                            if current_line_length + char_width > width:
-                                                content_lines_count += 1
-                                                current_line_length = char_width
-                                            else:
-                                                current_line_length += char_width
-                                    
-                                    # After the loop, check for a soft wrap on the very last line.
-                                    # This happens if content doesn't end with \n and the last line is full.
-                                    if not response_content.endswith('\n') and current_line_length > 0 and current_line_length % width == 0:
-                                        # This is ambiguous, but many terminals will move the cursor
-                                        # to the next line, so we need to account for it.
-                                        content_lines_count += 1
-                                
-                                # Total lines to move up: header (1) + content lines.
-                                total_lines_up = 1 + content_lines_count
-
-                                # Move cursor up, clear, and reprint formatted
-                                sys.stdout.write(f"\x1b[{total_lines_up}A")
-                                sys.stdout.write("\x1b[J")
-                                sys.stdout.flush()
-
-                                print_formatted_text(FormattedText(assistant_header), style=self.style)
-                                display_response_tuples = self._format_markdown_for_terminal(response_content)
-                                print_formatted_text(FormattedText(display_response_tuples), style=self.style)
-                                print() # Match spacing of non-streaming case
-
-                            except Exception as fmt_e:
-                                # If formatting fails, just print a newline to not mess up the prompt
-                                print()
-                                self.logger.warning(f"Could not re-format streaming response: {fmt_e}")
-                        else:
-                            # Not a markdown candidate. The original streamed output is fine.
-                            # We just need the newline that was originally there.
-                            print()
-                    else:
-                        # Error occurred during stream. Just add a newline.
-                        print()
-
-                except Exception as e:
-                    self.logger.error(f"Error while streaming from LLM: {e}", exc_info=True)
-                    error_message = f"An unexpected error occurred during streaming: {e}"
-            
-            else: # Fallback to original non-streaming behavior, but without spinner
-                try:
-                    response_content, error_message = self.client.generate_content(
-                        system_prompt=system_prompt_text, history=history_to_send
-                    )
-                except Exception as e:
-                    self.logger.error(f"Error calling LLM: {e}", exc_info=True)
-                    error_message = f"An unexpected error occurred during LLM API call: {e}"
-
-            # --- Handle response ---
-            if error_message:
-                self.logger.error(
-                    f"Error calling LLM API ({self.client.__class__.__name__}): {error_message}",
-                )
-                return None
-            elif response_content is None:
-                self.logger.warning(
-                    f"LLM API ({self.client.__class__.__name__}) returned no content.",
-                )
-                return None
-            else:
-                # For non-streaming, we need to print the response here.
-                # For streaming, it was already printed chunk-by-chunk.
-                if not (self.state.use_streaming and hasattr(self.client, 'generate_content_stream')):
-                    assistant_header = [('class:assistant.header', 'ASSISTANT'), ('', ':\n')]
-                    print_formatted_text(FormattedText(assistant_header), style=self.style)
-
-                    # Format for display if in ask mode and not an edit block
-                    if self.state.mode == "ask" and response_content and not response_content.strip().startswith("<"):
-                        display_response_tuples = self._format_markdown_for_terminal(response_content)
-                        print_formatted_text(FormattedText(display_response_tuples), style=self.style)
-                    else:
-                        # Print raw content, but use prompt_toolkit to handle potential long lines
-                        print_formatted_text(response_content)
-                    
-                    print() # Add a final newline for spacing
-
-                output_chars = len(response_content)
-                output_tokens = round(output_chars / 4) # Based on raw response
-                self.state.total_output_tokens += output_tokens
-                self.logger.debug("Approx. response tokens: %d", output_tokens)
-            
-                return response_content
-
-        except Exception as e:
-            # Catch any unexpected errors during the process
-            self.logger.error(
-                f"An unexpected error occurred preparing for or handling LLM API call ({self.client.__class__.__name__}): {e}",
-            )
-            # Print traceback for debugging unexpected issues
-            traceback.print_exc()
-            return None  # Indicate error
+        # Use the LLM response processor to handle the actual LLM interaction
+        return self.llm_processor.process(final_messages, self.state.mode, self.state.use_streaming)
 
     def _git_add_commit(self, paths_to_commit: Optional[List[str]] = None):
         """
@@ -851,18 +693,16 @@ class App:
 
     def _display_usage_summary(self):
         """Calculates and displays the token usage and estimated cost for the session."""
-        if self.state.total_input_tokens == 0 and self.state.total_output_tokens == 0:
+        input_tokens, output_tokens, total_tokens = self.llm_processor.get_usage_summary()
+        
+        if total_tokens == 0:
             return  # Don't display anything if no API calls were made
 
-        pricing = get_model_pricing(self.model)
-        total_tokens = self.state.total_input_tokens + self.state.total_output_tokens
+        cost_estimate = self.llm_processor.get_cost_estimate()
         
         cost_line = ""
-        if pricing:
-            input_cost = (self.state.total_input_tokens / 1_000_000) * pricing["input"]
-            output_cost = (self.state.total_output_tokens / 1_000_000) * pricing["output"]
-            total_cost = input_cost + output_cost
-            cost_line = f"Est. Cost:  {STYLES['BOLD']}{FmtColors['YELLOW']}${total_cost:.4f}{RESET}"
+        if cost_estimate is not None:
+            cost_line = f"Est. Cost:  {STYLES['BOLD']}{FmtColors['YELLOW']}${cost_estimate:.4f}{RESET}"
         elif self.model:
             cost_line = f"Est. Cost:  {FmtColors['GREY']}(price data unavailable for {self.model}){RESET}"
             
@@ -871,7 +711,7 @@ class App:
         model_line = f"Model:      {STYLES['BOLD']}{FmtColors['GREEN']}{self.model}{RESET}"
         tokens_line = (
             f"Tokens:     {STYLES['BOLD']}{FmtColors['CYAN']}{total_tokens:,}{RESET} "
-            f"{FmtColors['GREY']}(Input: {self.state.total_input_tokens:,} | Output: {self.state.total_output_tokens:,}){RESET}"
+            f"{FmtColors['GREY']}(Input: {input_tokens:,} | Output: {output_tokens:,}){RESET}"
         )
 
         def get_visual_length(s: str) -> int:
