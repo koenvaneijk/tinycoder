@@ -1,9 +1,9 @@
 import logging
 import os
-import platform
 import re # Added for markdown formatting
 import sys
 import traceback
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Set, Dict, Optional, Tuple
 
@@ -31,11 +31,20 @@ from tinycoder.input_preprocessor import InputPreprocessor
 from tinycoder.ui.console_interface import ring_bell, prompt_user_input
 from tinycoder.ui.command_completer import PTKCommandCompleter
 from tinycoder.ui.log_formatter import ColorLogFormatter, STYLES, COLORS as FmtColors, RESET
+import tinycoder.config as config
 from tinycoder.docker_manager import DockerManager
 
-COMMIT_PREFIX = "🤖 tinycoder: "
-HISTORY_FILE = ".tinycoder_history"
-APP_NAME = "tinycoder"
+
+@dataclass
+class AppState:
+    mode: str = "code"
+    coder_commits: Set[str] = field(default_factory=set)
+    lint_errors_found: Dict[str, str] = field(default_factory=dict)
+    reflected_message: Optional[str] = None
+    include_repo_map: bool = True
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    cached_token_breakdown: Dict[str, int] = field(default_factory=dict)
 
 
 class App:
@@ -52,7 +61,8 @@ class App:
         self._init_input_preprocessor() # Initialize InputPreprocessor
         self._init_prompt_session() # Initialize PromptSession and styles
         self._reconfigure_logging_for_ptk() # Switch to prompt_toolkit-aware logging
-        self._init_app_state()
+        self.state = AppState()
+        self.logger.debug("Basic app state initialized (commits, mode, lint status, repo map toggle, usage tracking).")
         self._init_command_handler()
         self._init_app_components()
         self._log_final_status()
@@ -183,13 +193,7 @@ class App:
         project_identifier = self._get_project_identifier()
         self.logger.debug(f"Project identifier for rules: {project_identifier}")
 
-        if platform.system() == "Windows":
-            config_dir = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming")) / APP_NAME
-        elif platform.system() == "Darwin":  # macOS
-            config_dir = Path.home() / "Library" / "Application Support" / APP_NAME
-        else:  # Linux and other Unix-like systems
-            config_dir = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / APP_NAME
-        
+        config_dir = config.get_config_dir()
         rules_config_path = config_dir / "rules_config.json"
         self.logger.debug(f"Rules configuration path: {rules_config_path}")
 
@@ -237,10 +241,7 @@ class App:
 
     def _init_prompt_session(self) -> None:
         """Initializes the prompt_toolkit session, completer, and style."""
-        # Setup history file
-        hist_dir = Path.home() / ".local" / "share" / APP_NAME
-        hist_dir.mkdir(parents=True, exist_ok=True)
-        history_file = hist_dir / HISTORY_FILE
+        history_file = config.get_history_file_path()
 
         # Setup completer
         self.completer: Optional[Completer] = PTKCommandCompleter(self.file_manager, self.git_manager)
@@ -300,21 +301,9 @@ class App:
         )
         self.logger.debug("InputPreprocessor initialized.")
 
-    def _init_app_state(self) -> None:
-        """Initializes basic application state variables."""
-        self.coder_commits: Set[str] = set()
-        self.mode = "code" # Default mode
-        self.lint_errors_found: Dict[str, str] = {}
-        self.reflected_message: Optional[str] = None
-        self.include_repo_map: bool = True # Default to including the repo map
-        self.total_input_tokens: int = 0
-        self.total_output_tokens: int = 0
-        self.cached_token_breakdown: Dict[str, int] = {} # For UI performance
-        self.logger.debug("Basic app state initialized (commits, mode, lint status, repo map toggle, usage tracking).")
-
     def toggle_repo_map(self, state: bool) -> None:
         """Sets the state for including the repo map in prompts."""
-        self.include_repo_map = state
+        self.state.include_repo_map = state
         status_str = f"{FmtColors['GREEN']}enabled{RESET}" if state else f"{FmtColors['YELLOW']}disabled{RESET}"
         self.logger.info(f"Repository map inclusion in prompts is now {status_str}.")
 
@@ -408,11 +397,11 @@ class App:
             logger=self.logger,
             clear_history_func=self.history_manager.clear,
             write_history_func=self.history_manager.save_message_to_file_only,
-            get_mode=lambda: self.mode,
-            set_mode=lambda mode: setattr(self, "mode", mode),
+            get_mode=lambda: self.state.mode,
+            set_mode=lambda mode: setattr(self.state, "mode", mode),
             git_commit_func=self._git_add_commit,
             git_undo_func=self._git_undo,
-            app_name=APP_NAME,
+            app_name=config.APP_NAME,
             enable_rule_func=self.rule_manager.enable_rule, 
             disable_rule_func=self.rule_manager.disable_rule,
             list_rules_func=self.rule_manager.list_rules,
@@ -640,7 +629,7 @@ class App:
         Generates the formatted text for the bottom toolbar from cached token context.
         This function must be extremely fast as it's called on every redraw.
         """
-        breakdown = self.cached_token_breakdown
+        breakdown = self.state.cached_token_breakdown
         total = breakdown.get("total", 0)
         
         # Determine color based on total tokens
@@ -667,7 +656,7 @@ class App:
         Performs the expensive token calculation and caches the result.
         This should only be called when the context has actually changed.
         """
-        self.cached_token_breakdown = self._get_current_context_token_breakdown()
+        self.state.cached_token_breakdown = self._get_current_context_token_breakdown()
         self.logger.debug("Token context breakdown cache updated.")
         
     def _get_current_context_token_breakdown(self) -> Dict[str, int]:
@@ -680,7 +669,7 @@ class App:
         active_rules = self.rule_manager.get_active_rules_content()
         # Build system prompt WITHOUT repo map to isolate its size
         base_system_prompt_content = self.prompt_builder.build_system_prompt(
-            self.mode,
+            self.state.mode,
             active_rules,
             include_map=False # Exclude map for this part of calculation
         )
@@ -688,7 +677,7 @@ class App:
 
         # 2. Repo Map
         repo_map_tokens = 0
-        if self.include_repo_map:
+        if self.state.include_repo_map:
             # Generate the repo map separately to get its size
             chat_files_rel = self.file_manager.get_files()
             repo_map_str = self.repo_map.generate_map(chat_files_rel)
@@ -725,9 +714,9 @@ class App:
         # Pass the loaded active rules content and the repo map state
         active_rules = self.rule_manager.get_active_rules_content() # Get from RuleManager
         system_prompt_content = self.prompt_builder.build_system_prompt(
-            self.mode,
+            self.state.mode,
             active_rules,
-            self.include_repo_map      # Pass the toggle state
+            self.state.include_repo_map      # Pass the toggle state
         )
         system_prompt_msg = {"role": "system", "content": system_prompt_content}
 
@@ -784,7 +773,7 @@ class App:
 
             input_chars = sum(len(msg["content"]) for msg in history_to_send) + len(system_prompt_text)
             input_tokens = round(input_chars / 4)
-            self.total_input_tokens += input_tokens
+            self.state.total_input_tokens += input_tokens
             
             self.logger.debug(f"Approx. input tokens to send: {input_tokens}")
 
@@ -847,7 +836,7 @@ class App:
                     print_formatted_text(FormattedText(assistant_header), style=self.style)
 
                     # Format for display if in ask mode and not an edit block
-                    if self.mode == "ask" and response_content and not response_content.strip().startswith("<"):
+                    if self.state.mode == "ask" and response_content and not response_content.strip().startswith("<"):
                         display_response_tuples = self._format_markdown_for_terminal(response_content)
                         print_formatted_text(FormattedText(display_response_tuples), style=self.style)
                     else:
@@ -858,7 +847,7 @@ class App:
 
                 output_chars = len(response_content)
                 output_tokens = round(output_chars / 4) # Based on raw response
-                self.total_output_tokens += output_tokens
+                self.state.total_output_tokens += output_tokens
                 self.logger.debug("Approx. response tokens: %d", output_tokens)
             
                 return response_content
@@ -917,7 +906,7 @@ class App:
 
         # Prepare commit message
         commit_message = (
-            f"{COMMIT_PREFIX} Changes to {', '.join(sorted(files_to_commit_rel))}"
+            f"{config.COMMIT_PREFIX} Changes to {', '.join(sorted(files_to_commit_rel))}"
         )
 
         # Call GitManager to commit
@@ -926,7 +915,7 @@ class App:
         )
 
         if commit_hash:
-            self.coder_commits.add(commit_hash)
+            self.state.coder_commits.add(commit_hash)
             # Success message printed by GitManager
         # else: # Failure messages printed by GitManager
 
@@ -941,8 +930,8 @@ class App:
             # Error already printed by GitManager
             return
 
-        if last_hash not in self.coder_commits:
-            self.logger.error(f"Last commit {FmtColors['YELLOW']}{last_hash}{RESET} was not made by {STYLES['BOLD']}{APP_NAME}{RESET}.")
+        if last_hash not in self.state.coder_commits:
+            self.logger.error(f"Last commit {FmtColors['YELLOW']}{last_hash}{RESET} was not made by {STYLES['BOLD']}{config.APP_NAME}{RESET}.")
             self.logger.info("You can manually undo with 'git reset HEAD~1'")
             return
 
@@ -950,7 +939,7 @@ class App:
         success = self.git_manager.undo_last_commit(last_hash)
 
         if success:
-            self.coder_commits.discard(last_hash)  # Remove hash if undo succeeded
+            self.state.coder_commits.discard(last_hash)  # Remove hash if undo succeeded
             # Use history manager to log the undo action to the file only
             self.history_manager.save_message_to_file_only(
                 "tool", f"Undid commit {last_hash}"
@@ -1018,7 +1007,7 @@ class App:
 
         if not confirm: # Handles cancellation from prompt_user_input
             self.logger.info(f"{FmtColors['YELLOW']}\nFile addition (from LLM request) cancelled by user.{RESET}")
-            self.reflected_message = "User cancelled the addition of requested files. Please advise on how to proceed or if you can continue without them."
+            self.state.reflected_message = "User cancelled the addition of requested files. Please advise on how to proceed or if you can continue without them."
             return True
 
         files_to_add_confirmed = []
@@ -1047,29 +1036,29 @@ class App:
                     f"The following files have been added to the context as per your request: {', '.join(colored_successfully_added_fnames)}. "
                     "Please proceed with the original task based on the updated context."
                 )
-                self.reflected_message = reflection_content
+                self.state.reflected_message = reflection_content
                 return True
             else:
                 self.logger.info("No files were ultimately added from LLM's request despite confirmation.")
         else: 
             self.logger.debug("User chose not to add files requested by LLM, or selection was invalid.")
-            self.reflected_message = "User declined to add the requested files. Please advise on how to proceed or if you can continue without them."
+            self.state.reflected_message = "User declined to add the requested files. Please advise on how to proceed or if you can continue without them."
             return True
 
         return False
 
     def _display_usage_summary(self):
         """Calculates and displays the token usage and estimated cost for the session."""
-        if self.total_input_tokens == 0 and self.total_output_tokens == 0:
+        if self.state.total_input_tokens == 0 and self.state.total_output_tokens == 0:
             return  # Don't display anything if no API calls were made
 
         pricing = get_model_pricing(self.model)
-        total_tokens = self.total_input_tokens + self.total_output_tokens
+        total_tokens = self.state.total_input_tokens + self.state.total_output_tokens
         
         cost_line = ""
         if pricing:
-            input_cost = (self.total_input_tokens / 1_000_000) * pricing["input"]
-            output_cost = (self.total_output_tokens / 1_000_000) * pricing["output"]
+            input_cost = (self.state.total_input_tokens / 1_000_000) * pricing["input"]
+            output_cost = (self.state.total_output_tokens / 1_000_000) * pricing["output"]
             total_cost = input_cost + output_cost
             cost_line = f"Est. Cost:  {STYLES['BOLD']}{FmtColors['YELLOW']}${total_cost:.4f}{RESET}"
         elif self.model:
@@ -1080,7 +1069,7 @@ class App:
         model_line = f"Model:      {STYLES['BOLD']}{FmtColors['GREEN']}{self.model}{RESET}"
         tokens_line = (
             f"Tokens:     {STYLES['BOLD']}{FmtColors['CYAN']}{total_tokens:,}{RESET} "
-            f"{FmtColors['GREY']}(Input: {self.total_input_tokens:,} | Output: {self.total_output_tokens:,}){RESET}"
+            f"{FmtColors['GREY']}(Input: {self.state.total_input_tokens:,} | Output: {self.state.total_output_tokens:,}){RESET}"
         )
 
         def get_visual_length(s: str) -> int:
@@ -1140,12 +1129,12 @@ class App:
                 # so we can potentially proceed to edits if any were also sent.
 
             # --- Process Edits (only if not already handling a file request reflection and in code mode) ---
-            if not self.reflected_message and self.mode == "code":
+            if not self.state.reflected_message and self.state.mode == "code":
                 if edits:
                     all_succeeded, failed_indices, modified_files, lint_errors = (
                         await self.code_applier.apply_edits(edits)
                     )
-                    self.lint_errors_found = lint_errors 
+                    self.state.lint_errors_found = lint_errors 
 
                     if all_succeeded:
                         if modified_files:
@@ -1166,23 +1155,23 @@ class App:
                             f"but you should provide corrections for the failed ones before proceeding."
                         )
                         self.logger.error(error_message)
-                        self.reflected_message = error_message 
+                        self.state.reflected_message = error_message 
                     
                 else:  # No edits found by parser (and no file requests were actioned to cause reflection)
                     self.logger.debug("No actionable edit blocks found in the response.")
 
                 # --- Check for Lint Errors (related to edits) ---
                 # Only trigger lint reflection if no other more critical reflection (like edit failure) is already set.
-                if self.lint_errors_found and not self.reflected_message: 
+                if self.state.lint_errors_found and not self.state.reflected_message: 
                     error_messages = ["Found syntax errors after applying edits:"]
-                    for fname, error in self.lint_errors_found.items():
+                    for fname, error in self.state.lint_errors_found.items():
                         error_messages.append(f"\n--- Errors in {FmtColors['CYAN']}{fname}{RESET} ---\n{error}")
                     combined_errors = "\n".join(error_messages)
                     self.logger.error(combined_errors)
 
                     fix_lint = await self._prompt_for_confirmation(f"{FmtColors['YELLOW']}Attempt to fix lint errors? (y/N): {RESET}")
                     if fix_lint.lower() == "y":
-                        self.reflected_message = combined_errors
+                        self.state.reflected_message = combined_errors
             
         # Mode reversion (if any) is handled in run_one after this function returns
 
@@ -1192,7 +1181,7 @@ class App:
 
         # Use PromptBuilder to build the identify files prompt, passing repo map state
         system_prompt = self.prompt_builder.build_identify_files_prompt(
-            include_map=self.include_repo_map
+            include_map=self.state.include_repo_map
         )
 
         history_for_files = [{"role": "user", "content": instruction}]
@@ -1243,8 +1232,8 @@ class App:
 
     def init_before_message(self):
         """Resets state before processing a new user message."""
-        self.lint_errors_found = {}
-        self.reflected_message = None
+        self.state.lint_errors_found = {}
+        self.state.reflected_message = None
 
     def _format_markdown_for_terminal(self, markdown_text: str) -> List[Tuple[str, str]]:
         """Converts markdown text to a list of (style_class, text) tuples for prompt_toolkit."""
@@ -1336,7 +1325,7 @@ class App:
             return True  # Nothing more to process for this input cycle
 
         # --- Check if we need to ask LLM for files (code mode, no files yet) ---
-        if self.mode == "code" and not self.file_manager.get_files():
+        if self.state.mode == "code" and not self.file_manager.get_files():
             self.logger.info(f"No files in context for {STYLES['BOLD']}{FmtColors['GREEN']}CODE{RESET} mode.")
             suggested_files = self._ask_llm_for_files(message)
             added_files_count = 0
@@ -1370,12 +1359,12 @@ class App:
         await self.process_user_input(non_interactive=non_interactive)  # This now handles LLM call, edits, linting
 
         # Check if reflection is needed *and* allowed (interactive mode)
-        while not non_interactive and self.reflected_message:
+        while not non_interactive and self.state.reflected_message:
             if num_reflections >= max_reflections:
                 self.logger.warning(
                     f"Reached max reflection limit ({max_reflections}). Stopping reflection.",
                 )
-                self.reflected_message = None  # Prevent further loops
+                self.state.reflected_message = None  # Prevent further loops
                 break  # Exit reflection loop
 
             num_reflections += 1
@@ -1383,9 +1372,9 @@ class App:
                 f"Reflection {num_reflections}/{max_reflections}: Sending feedback to LLM..."
             )
             message = (
-                self.reflected_message
+                self.state.reflected_message
             )  # Use the reflected message as the next input
-            self.reflected_message = (
+            self.state.reflected_message = (
                 None  # Clear before potentially being set again by process_user_input
             )
 
@@ -1407,7 +1396,7 @@ class App:
         while True:
             try:
                 # 1. Build the prompt message
-                mode_str = self.mode.upper() # Use uppercase for consistency
+                mode_str = self.state.mode.upper() # Use uppercase for consistency
                 prompt_message = FormattedText([
                     ('class:prompt.mode', f'{mode_str}'),
                     ('class:prompt.separator', ' > '),
