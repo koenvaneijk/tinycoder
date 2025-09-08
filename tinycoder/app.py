@@ -273,9 +273,9 @@ class App:
         # Get current files in context
         files = list(self.file_manager.get_files())
         if files:
-            files_str = f"Files ({len(files)}): {', '.join(files[:5])}{'...' if len(files) > 5 else ''}"
+            files_str = f"  Files ({len(files)}): {', '.join(files[:5])}{'...' if len(files) > 5 else ''}"
         else:
-            files_str = "Files: none"
+            files_str = "  Files: none"
         
         # Create multi-line toolbar with files on top line and tokens below
         toolbar_text = f"{files_str}\n{self.formatter.format_bottom_toolbar(breakdown)}"
