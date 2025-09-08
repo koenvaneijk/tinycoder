@@ -39,6 +39,7 @@ class AppState:
     lint_errors_found: Dict[str, str] = field(default_factory=dict)
     reflected_message: Optional[str] = None
     include_repo_map: bool = True
+    use_streaming: bool = False
     total_input_tokens: int = 0
     total_output_tokens: int = 0
     cached_token_breakdown: Dict[str, int] = field(default_factory=dict)
@@ -522,7 +523,7 @@ class App:
             error_message = None
 
             # Check for streaming capability
-            if hasattr(self.client, 'generate_content_stream'):
+            if self.state.use_streaming and hasattr(self.client, 'generate_content_stream'):
                 assistant_header = [('class:assistant.header', 'ASSISTANT'), ('', ':\n')]
                 print_formatted_text(FormattedText(assistant_header), style=self.style)
                 
@@ -632,7 +633,7 @@ class App:
             else:
                 # For non-streaming, we need to print the response here.
                 # For streaming, it was already printed chunk-by-chunk.
-                if not hasattr(self.client, 'generate_content_stream'):
+                if not (self.state.use_streaming and hasattr(self.client, 'generate_content_stream')):
                     assistant_header = [('class:assistant.header', 'ASSISTANT'), ('', ':\n')]
                     print_formatted_text(FormattedText(assistant_header), style=self.style)
 
