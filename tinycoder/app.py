@@ -30,6 +30,7 @@ from tinycoder.shell_executor import ShellExecutor
 from tinycoder.ui.console_interface import ring_bell, prompt_user_input
 from tinycoder.ui.log_formatter import STYLES, COLORS as FmtColors, RESET
 from tinycoder.ui.markdown_formatter import MarkdownFormatter
+from tinycoder.ui.session_summary import format_session_summary
 import tinycoder.config as config
 from tinycoder.docker_manager import DockerManager
 
@@ -658,63 +659,12 @@ class App:
 
         return False
 
-    def _display_usage_summary(self):
+    def _display_usage_summary(self) -> None:
         """Calculates and displays the token usage and estimated cost for the session."""
-        input_tokens, output_tokens, total_tokens = self.llm_processor.get_usage_summary()
-        
-        if total_tokens == 0:
-            return  # Don't display anything if no API calls were made
-
+        input_tokens, output_tokens, _total_tokens = self.llm_processor.get_usage_summary()
         cost_estimate = self.llm_processor.get_cost_estimate()
-        
-        cost_line = ""
-        if cost_estimate is not None:
-            cost_line = f"Est. Cost:  {STYLES['BOLD']}{FmtColors['YELLOW']}${cost_estimate:.4f}{RESET}"
-        elif self.model:
-            cost_line = f"Est. Cost:  {FmtColors['GREY']}(price data unavailable for {self.model}){RESET}"
-            
-        # Prepare formatted lines
-        title_line = f"{STYLES['BOLD']}Session Summary{RESET}"
-        model_line = f"Model:      {STYLES['BOLD']}{FmtColors['GREEN']}{self.model}{RESET}"
-        tokens_line = (
-            f"Tokens:     {STYLES['BOLD']}{FmtColors['CYAN']}{total_tokens:,}{RESET} "
-            f"{FmtColors['GREY']}(Input: {input_tokens:,} | Output: {output_tokens:,}){RESET}"
-        )
-
-        def get_visual_length(s: str) -> int:
-            """Calculates the visible length of a string by removing ANSI escape codes."""
-            return len(re.sub(r'\x1b\[[0-9;]*m', '', s))
-
-        # Build the final output string with a box
-        border_char = '─'
-        width = 60 # Fixed width for simplicity and clean alignment
-
-        def pad_line(line: str) -> str:
-            """Pads a line to the fixed width, accounting for ANSI codes."""
-            visual_len = get_visual_length(line)
-            padding = ' ' * (width - visual_len)
-            return f"{line}{padding}"
-        
-        def center_line(line: str) -> str:
-            """Centers a line within the fixed width, accounting for ANSI codes."""
-            visual_len = get_visual_length(line)
-            padding_total = width - visual_len
-            if padding_total < 0: padding_total = 0
-            left_pad = ' ' * (padding_total // 2)
-            right_pad = ' ' * (padding_total - len(left_pad))
-            return f"{left_pad}{line}{right_pad}"
-
-        summary_message = (
-            f"\n{FmtColors['GREY']}┌{border_char * (width + 2)}┐{RESET}\n"
-            f"{FmtColors['GREY']}│ {center_line(title_line)} {FmtColors['GREY']}│{RESET}\n"
-            f"{FmtColors['GREY']}├{border_char * (width + 2)}┤{RESET}\n"
-            f"{FmtColors['GREY']}│ {pad_line(model_line)} {FmtColors['GREY']}│{RESET}\n"
-            f"{FmtColors['GREY']}│ {pad_line(tokens_line)} {FmtColors['GREY']}│{RESET}\n"
-            f"{FmtColors['GREY']}│ {pad_line(cost_line)} {FmtColors['GREY']}│{RESET}\n"
-            f"{FmtColors['GREY']}└{border_char * (width + 2)}┘{RESET}"
-        )
-        # Use print() to ensure the summary is always visible regardless of log level
-        print(summary_message)
+        summary = format_session_summary(self.model, input_tokens, output_tokens, cost_estimate)
+        print(summary)
 
     async def process_user_input(self, non_interactive: bool = False):
         """Processes the latest user input (already in history), sends to LLM, handles response."""
