@@ -1,4 +1,5 @@
 import logging
+import os
 import re
 import sys
 import traceback
@@ -7,8 +8,10 @@ from pathlib import Path
 from typing import List, Set, Dict, Optional, Tuple
 
 from prompt_toolkit import PromptSession, print_formatted_text
+from prompt_toolkit.application.current import get_app
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.styles import Style
+from prompt_toolkit.utils import get_cwidth
 
 from tinycoder.chat_history import ChatHistoryManager
 from tinycoder.code_applier import CodeApplier
@@ -538,9 +541,61 @@ class App:
                         sys.stdout.flush() # Ensure chunks are displayed immediately
                         full_response_chunks.append(chunk)
                     
-                    print() # Newline after the full response
                     if not error_message:
                         response_content = "".join(full_response_chunks)
+
+                        # --- Re-render with formatting if applicable ---
+                        is_markdown_candidate = self.state.mode == "ask" and response_content and not response_content.strip().startswith("<")
+                        
+                        if is_markdown_candidate:
+                            try:
+                                # Attempt to replace streamed raw output with formatted output
+                                try:
+                                    width = get_app().output.get_size().columns
+                                except Exception:
+                                    width = os.get_terminal_size().columns
+                                
+                                # Calculate lines for the streamed content
+                                content_lines_count = 0
+                                if response_content:
+                                    content_lines_count = 1
+                                    current_line_length = 0
+                                    for char in response_content:
+                                        if char == '\n':
+                                            content_lines_count += 1
+                                            current_line_length = 0
+                                        else:
+                                            char_width = get_cwidth(char)
+                                            if current_line_length + char_width > width:
+                                                content_lines_count += 1
+                                                current_line_length = char_width
+                                            else:
+                                                current_line_length += char_width
+                                
+                                # Total lines to move up: header (1) + content lines.
+                                total_lines_up = 1 + content_lines_count
+
+                                # Move cursor up, clear, and reprint formatted
+                                sys.stdout.write(f"\x1b[{total_lines_up}A")
+                                sys.stdout.write("\x1b[J")
+                                sys.stdout.flush()
+
+                                print_formatted_text(FormattedText(assistant_header), style=self.style)
+                                display_response_tuples = self._format_markdown_for_terminal(response_content)
+                                print_formatted_text(FormattedText(display_response_tuples), style=self.style)
+                                print() # Match spacing of non-streaming case
+
+                            except Exception as fmt_e:
+                                # If formatting fails, just print a newline to not mess up the prompt
+                                print()
+                                self.logger.warning(f"Could not re-format streaming response: {fmt_e}")
+                        else:
+                            # Not a markdown candidate. The original streamed output is fine.
+                            # We just need the newline that was originally there.
+                            print()
+                    else:
+                        # Error occurred during stream. Just add a newline.
+                        print()
 
                 except Exception as e:
                     self.logger.error(f"Error while streaming from LLM: {e}", exc_info=True)
