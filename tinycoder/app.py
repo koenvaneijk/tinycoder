@@ -25,6 +25,7 @@ from tinycoder.shell_executor import ShellExecutor
 from tinycoder.ui.console_interface import ring_bell, prompt_user_input
 from tinycoder.ui.log_formatter import STYLES, COLORS as FmtColors, RESET
 from tinycoder.ui.session_summary import format_session_summary
+from tinycoder.ui.app_formatter import AppFormatter
 import tinycoder.config as config
 from tinycoder.docker_manager import DockerManager
 from tinycoder.docker_automation import DockerAutomation
@@ -81,6 +82,7 @@ class App:
         self.shell_executor = shell_executor
         self.prompt_session = prompt_session
         self.style = style
+        self.formatter = AppFormatter()
 
         # Initialize context manager
         self.context_manager = ContextManager(
@@ -116,8 +118,10 @@ class App:
     def toggle_repo_map(self, state: bool) -> None:
         """Sets the state for including the repo map in prompts."""
         self.context_manager.set_repo_map_state(state)
-        status_str = f"{FmtColors['GREEN']}enabled{RESET}" if state else f"{FmtColors['YELLOW']}disabled{RESET}"
-        self.logger.info(f"Repository map inclusion in prompts is now {status_str}.")
+        status_message = self.formatter.format_status_message(
+            state, "Repository map inclusion in prompts"
+        )
+        self.logger.info(status_message)
 
     def _get_current_repo_map_string(self) -> str:
         """Generates and returns the current repository map string."""
@@ -184,8 +188,8 @@ class App:
                         "tool",
                         f"Added {added_count} file(s) to context from LLM suggestion: {', '.join(successfully_added_fnames)}"
                     )
-                    colored_fnames = [f"{FmtColors['CYAN']}{f}{RESET}" for f in successfully_added_fnames]
-                    self.logger.debug(f"Added {added_count} file(s) to context: {', '.join(colored_fnames)}")
+                    colored_fnames = self.formatter.format_success_files(successfully_added_fnames)
+                    self.logger.debug(f"Added {added_count} file(s) to context: {colored_fnames}")
             else:
                 self.logger.debug("No suggested files were added to the context.")
         elif instruction: # _ask_llm_for_files was called but returned no files
@@ -265,26 +269,7 @@ class App:
         This function must be extremely fast as it's called on every redraw.
         """
         breakdown = self.context_manager.get_cached_token_breakdown()
-        total = breakdown.get("total", 0)
-        
-        # Determine color based on total tokens
-        total_color_class = 'class:bottom-toolbar.low'
-        if total > 25000:
-            total_color_class = 'class:bottom-toolbar.high'
-        elif total > 15000:
-            total_color_class = 'class:bottom-toolbar.medium'
-        
-        # Full word descriptions, single style for most text
-        parts = [
-            ('class:bottom-toolbar', '  Context: '),
-            (total_color_class, f'{total:,}'),
-            ('class:bottom-toolbar', f" (Prompt: {breakdown.get('prompt_rules', 0):,} | "),
-            ('class:bottom-toolbar', f"Map: {breakdown.get('repo_map', 0):,} | "),
-            ('class:bottom-toolbar', f"Files: {breakdown.get('files', 0):,} | "),
-            ('class:bottom-toolbar', f"History: {breakdown.get('history', 0):,})  "),
-        ]
-
-        return FormattedText(parts)
+        return self.formatter.format_bottom_toolbar(breakdown)
 
     def _update_and_cache_token_breakdown(self) -> None:
         """
@@ -513,11 +498,11 @@ class App:
                     successfully_added_fnames.append(fname)
             
             if added_count > 0:
-                colored_successfully_added_fnames = [f"{FmtColors['CYAN']}{f}{RESET}" for f in successfully_added_fnames]
-                tool_message = f"Added {added_count} file(s) to context from LLM request: {', '.join(colored_successfully_added_fnames)}"
+                colored_successfully_added_fnames = self.formatter.format_success_files(successfully_added_fnames)
+                tool_message = f"Added {added_count} file(s) to context from LLM request: {colored_successfully_added_fnames}"
                 self.history_manager.save_message_to_file_only("tool", tool_message)
                 reflection_content = (
-                    f"The following files have been added to the context as per your request: {', '.join(colored_successfully_added_fnames)}. "
+                    f"The following files have been added to the context as per your request: {colored_successfully_added_fnames}. "
                     "Please proceed with the original task based on the updated context."
                 )
                 self.state.reflected_message = reflection_content
@@ -576,8 +561,7 @@ class App:
                         else:
                             self.logger.info("Edits processed, but no files were changed.")
                     elif failed_indices:
-                        failed_indices_str = ", ".join(map(str, sorted(failed_indices)))
-                        colored_indices = f"{STYLES['BOLD']}{FmtColors['RED']}{failed_indices_str}{RESET}"
+                        colored_indices = self.formatter.format_error_indices(failed_indices)
                         error_message = (
                             f"Some edits failed to apply. No changes have been committed.\n"
                             f"Please review and provide corrected edit blocks for the failed edits.\n\n"
@@ -596,7 +580,8 @@ class App:
                 if self.state.lint_errors_found and not self.state.reflected_message: 
                     error_messages = ["Found syntax errors after applying edits:"]
                     for fname, error in self.state.lint_errors_found.items():
-                        error_messages.append(f"\n--- Errors in {FmtColors['CYAN']}{fname}{RESET} ---\n{error}")
+                        formatted_fname = self.formatter.format_success_files([fname])
+                        error_messages.append(f"\n--- Errors in {formatted_fname} ---\n{error}")
                     combined_errors = "\n".join(error_messages)
                     self.logger.error(combined_errors)
 
@@ -800,11 +785,7 @@ class App:
         while True:
             try:
                 # 1. Build the prompt message
-                mode_str = self.state.mode.upper() # Use uppercase for consistency
-                prompt_message = FormattedText([
-                    ('class:prompt.mode', f'{mode_str}'),
-                    ('class:prompt.separator', ' > '),
-                ])
+                prompt_message = self.formatter.format_mode_prompt(self.state.mode)
 
                 # 2. Build the bottom toolbar with token info
                 bottom_toolbar = self._get_bottom_toolbar_tokens
