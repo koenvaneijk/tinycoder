@@ -591,7 +591,7 @@ class App:
             
         # Mode reversion (if any) is handled in run_one after this function returns
 
-    def _ask_llm_for_files(self, instruction: str) -> List[str]:
+    def _ask_llm_for_files(self, instruction: str) -> Optional[List[str]]:
         """Asks the LLM to identify files needed for a given instruction."""
         self.logger.info(f"{self.formatter.format_info('Asking LLM to identify relevant files...')}")
 
@@ -607,7 +607,7 @@ class App:
             )
         except KeyboardInterrupt:
             self.logger.info("\nLLM file suggestion cancelled.")
-            return []  # Return empty list on cancellation
+            return None  # Return None on cancellation to indicate user wants to exit
 
         if error_message:
             self.logger.error(f"Error asking LLM for files: {error_message}")
@@ -633,11 +633,11 @@ class App:
                 existing_files.append(fname)
             else:
                 self.logger.warning(
-                    f"Ignoring non-existent file suggested by LLM: {FmtColors['RED']}{fname}{RESET}"
+                    f"Ignoring non-existent file suggested by LLM: {self.formatter.format_error(fname)}"
                 )
         
         if existing_files:
-            colored_existing_files = [f"{FmtColors['CYAN']}{f}{RESET}" for f in existing_files]
+            colored_existing_files = [f"{self.formatter.format_filename(f)}" for f in existing_files]
             self.logger.info(
                 f"LLM suggested files (after filtering): {', '.join(colored_existing_files)}",
             )
@@ -664,17 +664,23 @@ class App:
             return True
         return False
 
-    async def _ensure_files_for_code_mode(self, user_message: str) -> None:
+    async def _ensure_files_for_code_mode(self, user_message: str) -> bool:
         """
         Ensures files are present for code mode by asking the LLM if none exist.
+        Returns True if files were added or user cancelled, False if should exit.
         """
         if self.state.mode != "code":
-            return
+            return True
         if self.file_manager.get_files():
-            return
+            return True
 
         self.logger.info(f"No files in context for {self.formatter.format_bold(self.formatter.format_success('CODE'))} mode.")
         suggested_files = self._ask_llm_for_files(user_message)
+        
+        # If user cancelled the file suggestion (Ctrl+C), treat as exit
+        if suggested_files is None:
+            return False
+            
         added_files_count = 0
         if suggested_files:
             self.logger.info("Attempting to add suggested files to context...")
@@ -687,6 +693,8 @@ class App:
                 self.logger.warning("Could not add any of the files suggested by the LLM.")
         else:
             self.logger.warning("LLM did not suggest files, or failed to retrieve suggestions. Proceeding without file context.")
+        
+        return True
 
     async def _main_llm_loop(self, non_interactive: bool) -> None:
         """
@@ -745,7 +753,8 @@ class App:
         # Ensure the message is added to history before any LLM processing
         self.history_manager.add_message("user", user_message)
 
-        await self._ensure_files_for_code_mode(user_message)
+        if not await self._ensure_files_for_code_mode(user_message):
+            return False  # User cancelled, should exit
         await self._main_llm_loop(non_interactive)
         return True
 
