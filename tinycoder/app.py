@@ -593,7 +593,7 @@ class App:
 
     def _ask_llm_for_files(self, instruction: str) -> List[str]:
         """Asks the LLM to identify files needed for a given instruction."""
-        self.logger.info(f"{FmtColors['BLUE']}Asking LLM to identify relevant files...{RESET}")
+        self.logger.info(f"{self.formatter.format_info('Asking LLM to identify relevant files...')}")
 
         # Use PromptBuilder to build the identify files prompt, passing repo map state
         system_prompt = self.prompt_builder.build_identify_files_prompt(
