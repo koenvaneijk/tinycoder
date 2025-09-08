@@ -3,49 +3,119 @@ from typing import Dict, Optional, List, Any
 PRICING_DATA: Dict[str, List[Dict[str, Any]]] = {
   "providers": [
     {
-      "provider_name": "OpenAI",
+      "provider_name": "Google Gemini",
       "models": [
-        { "model_id": "gpt-4o", "input_price_per_million_tokens": 5.00, "output_price_per_million_tokens": 15.00 },
-        { "model_id": "gpt-4-turbo", "input_price_per_million_tokens": 10.00, "output_price_per_million_tokens": 30.00 },
-        { "model_id": "gpt-4", "input_price_per_million_tokens": 30.00, "output_price_per_million_tokens": 60.00 },
-        { "model_id": "gpt-3.5-turbo-0125", "input_price_per_million_tokens": 0.50, "output_price_per_million_tokens": 1.50 },
-        { "model_id": "gpt-4o-mini", "input_price_per_million_tokens": 0.15, "output_price_per_million_tokens": 0.60 }
+        {
+          "model_id": "gemini-2.5-pro",
+          "input_price_per_million_tokens": 1.25,
+          "output_price_per_million_tokens": 10.00
+        },
+        {
+          "model_id": "gemini-2.5-flash",
+          "input_price_per_million_tokens": 0.30,
+          "output_price_per_million_tokens": 2.50
+        },
+        {
+          "model_id": "gemini-2.5-flash-lite",
+          "input_price_per_million_tokens": 0.10,
+          "output_price_per_million_tokens": 0.40
+        }
       ]
     },
     {
       "provider_name": "Anthropic",
       "models": [
-        { "model_id": "claude-3-opus-20240229", "input_price_per_million_tokens": 15.00, "output_price_per_million_tokens": 75.00 },
-        { "model_id": "claude-3.5-sonnet-20240620", "input_price_per_million_tokens": 3.00, "output_price_per_million_tokens": 15.00 },
-        { "model_id": "claude-3-sonnet-20240229", "input_price_per_million_tokens": 3.00, "output_price_per_million_tokens": 15.00 },
-        { "model_id": "claude-3-haiku-20240307", "input_price_per_million_tokens": 0.25, "output_price_per_million_tokens": 1.25 }
+        {
+          "model_id": "claude-opus-4.1",
+          "input_price_per_million_tokens": 15.00,
+          "output_price_per_million_tokens": 75.00
+        },
+        {
+          "model_id": "claude-sonnet-4",
+          "input_price_per_million_tokens": 3.00,
+          "output_price_per_million_tokens": 15.00
+        },
+        {
+          "model_id": "claude-haiku-3.5",
+          "input_price_per_million_tokens": 0.80,
+          "output_price_per_million_tokens": 4.00
+        }
       ]
     },
     {
-      "provider_name": "Google",
+      "provider_name": "Together.ai",
       "models": [
-        { "model_id": "gemini-2.5-pro", "input_price_per_million_tokens": 1.25, "output_price_per_million_tokens": 10.00 },
-        { "model_id": "gemini-1.5-pro-latest", "input_price_per_million_tokens": 3.50, "output_price_per_million_tokens": 10.50 },
-        { "model_id": "gemini-1.5-flash-latest", "input_price_per_million_tokens": 0.35, "output_price_per_million_tokens": 1.05 }
+        {
+          "model_id": "llama-3.1-405b-instruct-turbo",
+          "input_price_per_million_tokens": 3.50,
+          "output_price_per_million_tokens": 3.50
+        },
+        {
+          "model_id": "deepseek-r1",
+          "input_price_per_million_tokens": 3.00,
+          "output_price_per_million_tokens": 7.00
+        },
+        {
+          "model_id": "qwen3-coder-480b-a35b-instruct",
+          "input_price_per_million_tokens": 2.00,
+          "output_price_per_million_tokens": 2.00
+        }
       ]
     },
     {
       "provider_name": "Groq",
       "models": [
-          { "model_id": "llama3-8b-8192", "input_price_per_million_tokens": 0.05, "output_price_per_million_tokens": 0.10 },
-          { "model_id": "llama3-70b-8192", "input_price_per_million_tokens": 0.59, "output_price_per_million_tokens": 0.79 },
-          { "model_id": "mixtral-8x7b-32768", "input_price_per_million_tokens": 0.24, "output_price_per_million_tokens": 0.24 },
-          { "model_id": "moonshotai/kimi-k2-instruct", "input_price_per_million_tokens": 1.00, "output_price_per_million_tokens": 3.00 }
+        {
+          "model_id": "llama-4-maverick",
+          "input_price_per_million_tokens": 0.20,
+          "output_price_per_million_tokens": 0.60
+        },
+        {
+          "model_id": "kimi-k2-0905-1t",
+          "input_price_per_million_tokens": 1.00,
+          "output_price_per_million_tokens": 3.00
+        },
+        {
+          "model_id": "llama-3-8b-8k",
+          "input_price_per_million_tokens": 0.05,
+          "output_price_per_million_tokens": 0.08
+        }
       ]
     },
     {
-        "provider_name": "Together",
-        "models": [
-            { "model_id": "Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8", "input_price_per_million_tokens": 2.00, "output_price_per_million_tokens": 2.00 },
-            { "model_id": "meta-llama/Llama-3-8B-chat-hf", "input_price_per_million_tokens": 0.10, "output_price_per_million_tokens": 0.10 },
-            { "model_id": "meta-llama/Llama-3-70B-chat-hf", "input_price_per_million_tokens": 0.90, "output_price_per_million_tokens": 0.90 },
-            { "model_id": "mistralai/Mixtral-8x7B-Instruct-v0.1", "input_price_per_million_tokens": 0.60, "output_price_per_million_tokens": 0.60 }
-        ]
+      "provider_name": "OpenAI",
+      "models": [
+        {
+          "model_id": "gpt-5",
+          "input_price_per_million_tokens": 1.25,
+          "output_price_per_million_tokens": 10.00
+        },
+        {
+          "model_id": "gpt-5-mini",
+          "input_price_per_million_tokens": 0.25,
+          "output_price_per_million_tokens": 2.00
+        },
+        {
+          "model_id": "gpt-5-nano",
+          "input_price_per_million_tokens": 0.05,
+          "output_price_per_million_tokens": 0.40
+        }
+      ]
+    },
+    {
+      "provider_name": "DeepSeek",
+      "models": [
+        {
+          "model_id": "deepseek-chat",
+          "input_price_per_million_tokens": 0.56,
+          "output_price_per_million_tokens": 1.68
+        },
+        {
+          "model_id": "deepseek-reasoner",
+          "input_price_per_million_tokens": 3.00,
+          "output_price_per_million_tokens": 7.00
+        }
+      ]
     }
   ]
 }
