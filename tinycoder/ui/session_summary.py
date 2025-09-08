@@ -13,14 +13,14 @@ def format_session_summary(
     input_tokens: int,
     output_tokens: int,
     cost_estimate: Optional[float],
-) -> FormattedText:
+) -> str:
     """
     Returns a boxed, coloured summary of token usage and cost.
     All ANSI styling is already embedded; callers can print it directly.
     """
     total_tokens = input_tokens + output_tokens
     if total_tokens == 0:
-        return FormattedText([])
+        return ""
 
     cost_line = ""
     if cost_estimate is not None:
@@ -62,4 +62,4 @@ def format_session_summary(
         f"{FmtColors['GREY']}│ {pad(cost_line)} {FmtColors['GREY']}│{RESET}\n"
         f"{FmtColors['GREY']}└{border_char * (width + 2)}┘{RESET}"
     )
-    return FormattedText([("", summary)])
+    return summary
