@@ -1,7 +1,6 @@
 import logging
 import sys
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import List, Set, Dict, Optional
 
 from prompt_toolkit import PromptSession
@@ -26,9 +25,10 @@ from tinycoder.ui.console_interface import ring_bell, prompt_user_input
 from tinycoder.ui.log_formatter import STYLES, COLORS as FmtColors, RESET
 from tinycoder.ui.session_summary import format_session_summary
 from tinycoder.ui.app_formatter import AppFormatter
-import tinycoder.config as config
 from tinycoder.docker_manager import DockerManager
 from tinycoder.docker_automation import DockerAutomation
+
+import tinycoder.config as config
 
 
 @dataclass
@@ -651,6 +651,67 @@ class App:
         self.state.lint_errors_found = {}
         self.state.reflected_message = None
 
+    async def _maybe_handle_special_input(self, user_message: str) -> bool:
+        """
+        Handles commands (/...) and shell escapes (!...).
+        Returns True if input was consumed, False otherwise.
+        """
+        if user_message.startswith("/"):
+            if not await self._handle_command(user_message):
+                return True  # Signal to exit
+            return True      # Input consumed
+        if user_message.startswith("!"):
+            self.shell_executor.execute(user_message, False)
+            return True
+        return False
+
+    async def _ensure_files_for_code_mode(self, user_message: str) -> None:
+        """
+        Ensures files are present for code mode by asking the LLM if none exist.
+        """
+        if self.state.mode != "code":
+            return
+        if self.file_manager.get_files():
+            return
+
+        self.logger.info(f"No files in context for {STYLES['BOLD']}{FmtColors['GREEN']}CODE{RESET} mode.")
+        suggested_files = self._ask_llm_for_files(user_message)
+        added_files_count = 0
+        if suggested_files:
+            self.logger.info("Attempting to add suggested files to context...")
+            for fname in suggested_files:
+                if self.file_manager.add_file(fname):
+                    added_files_count += 1
+            if added_files_count > 0:
+                self.logger.info(f"Added {added_files_count} file(s) suggested by LLM.")
+            else:
+                self.logger.warning("Could not add any of the files suggested by the LLM.")
+        else:
+            self.logger.warning("LLM did not suggest files, or failed to retrieve suggestions. Proceeding without file context.")
+
+    async def _main_llm_loop(self, non_interactive: bool) -> None:
+        """
+        Runs the main LLM interaction and optional reflection loops.
+        """
+        num_reflections = 0
+        max_reflections = 3
+
+        # Initial processing
+        await self.process_user_input(non_interactive=non_interactive)
+
+        # Reflection loop
+        while not non_interactive and self.state.reflected_message:
+            if num_reflections >= max_reflections:
+                self.logger.warning(f"Reached max reflection limit ({max_reflections}). Stopping reflection.")
+                self.state.reflected_message = None
+                break
+            num_reflections += 1
+            self.logger.info(f"Reflection {num_reflections}/{max_reflections}: Sending feedback to LLM...")
+            message = self.state.reflected_message
+            self.state.reflected_message = None
+            self.history_manager.add_message("user", message)
+            await self.process_user_input(non_interactive=non_interactive)
+
     
 
 
@@ -677,101 +738,13 @@ class App:
     async def run_one(self, user_message, preproc, non_interactive=False):
         """
         Processes a single user message, including potential reflection loops in interactive mode.
-
-        Args:
-            user_message: The message from the user.
-            preproc: Whether to preprocess the input (commands, URLs, file mentions).
-            non_interactive: If True, disables interactive features like the lint reflection prompt.
         """
         self.init_before_message()
-
-        if preproc:
-            if user_message.startswith("/"):
-                if not await self._handle_command(user_message):
-                    return False  # Exit signal
-                else:
-                    return True  # Command handled, stop further processing for this input cycle
-
-            elif user_message.startswith("!"):
-                # Delegate to ShellExecutor
-                if self.shell_executor.execute(user_message, non_interactive):
-                    return True # Command handled by ShellExecutor, stop further processing
-                # If execute returned False (though current design is always True),
-                # it would mean it wasn't a shell command or some other unhandled case.
-                # For now, assume execute always returns True.
-            else:
-                message = self.input_preprocessor.process(user_message)
-                if (
-                    message is False # This was a defensive check, `process` returns str
-                ):  # Should not happen from preproc, but check defensively
-                    return False  # Exit signal
-        else:
-            message = user_message
-
-        # If message is None or empty after potential command handling/preprocessing, stop
-        # (Handles cases like only running a ! command or a /command without a prompt arg)
-        if not message:
-            return True  # Nothing more to process for this input cycle
-
-        # --- Check if we need to ask LLM for files (code mode, no files yet) ---
-        if self.state.mode == "code" and not self.file_manager.get_files():
-            self.logger.info(f"No files in context for {STYLES['BOLD']}{FmtColors['GREEN']}CODE{RESET} mode.")
-            suggested_files = self._ask_llm_for_files(message)
-            added_files_count = 0
-            if suggested_files:
-                self.logger.info("Attempting to add suggested files to context...")
-                for fname in suggested_files:
-                    if self.file_manager.add_file(
-                        fname
-                    ):  # add_file returns True on success, prints errors otherwise
-                        added_files_count += 1
-                if added_files_count > 0:
-                    self.logger.info(
-                        f"Added {added_files_count} file(s) suggested by LLM."
-                    )
-                else:
-                    self.logger.warning(
-                        "Could not add any of the files suggested by the LLM.",
-                    )
-            else:
-                self.logger.warning(
-                    "LLM did not suggest files, or failed to retrieve suggestions. Proceeding without file context.",
-                )
-            # Proceed even if no files were added, the LLM might still respond or ask for them again.
-
-        # --- Main Processing & Optional Reflection ---
-        num_reflections = 0
-        max_reflections = 3
-
-        # Initial processing of the user message
-        self.history_manager.add_message("user", message)  # Use history manager
-        await self.process_user_input(non_interactive=non_interactive)  # This now handles LLM call, edits, linting
-
-        # Check if reflection is needed *and* allowed (interactive mode)
-        while not non_interactive and self.state.reflected_message:
-            if num_reflections >= max_reflections:
-                self.logger.warning(
-                    f"Reached max reflection limit ({max_reflections}). Stopping reflection.",
-                )
-                self.state.reflected_message = None  # Prevent further loops
-                break  # Exit reflection loop
-
-            num_reflections += 1
-            self.logger.info(
-                f"Reflection {num_reflections}/{max_reflections}: Sending feedback to LLM..."
-            )
-            message = (
-                self.state.reflected_message
-            )  # Use the reflected message as the next input
-            self.state.reflected_message = (
-                None  # Clear before potentially being set again by process_user_input
-            )
-
-            # Add the reflected message to history *before* processing
-            self.history_manager.add_message("user", message)
-            await self.process_user_input(non_interactive=non_interactive)  # Process the reflected input
-
-        return True  # Indicate normal processing occurred (or finished reflection loop)
+        if preproc and await self._maybe_handle_special_input(user_message):
+            return True
+        await self._ensure_files_for_code_mode(user_message)
+        await self._main_llm_loop(non_interactive)
+        return True
 
     async def run(self):
         """Main loop for the chat application using prompt_toolkit."""
