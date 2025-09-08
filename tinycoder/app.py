@@ -742,6 +742,10 @@ class App:
         self.init_before_message()
         if preproc and await self._maybe_handle_special_input(user_message):
             return True
+
+        # Ensure the message is added to history before any LLM processing
+        self.history_manager.add_message("user", user_message)
+
         await self._ensure_files_for_code_mode(user_message)
         await self._main_llm_loop(non_interactive)
         return True
