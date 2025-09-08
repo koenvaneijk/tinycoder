@@ -1,17 +1,12 @@
 import logging
-import os
-import re
 import sys
-import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Set, Dict, Optional, Tuple
+from typing import List, Set, Dict, Optional
 
-from prompt_toolkit import PromptSession, print_formatted_text
-from prompt_toolkit.application.current import get_app
+from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.styles import Style
-from prompt_toolkit.utils import get_cwidth
 
 from tinycoder.chat_history import ChatHistoryManager
 from tinycoder.code_applier import CodeApplier
@@ -29,10 +24,10 @@ from tinycoder.rule_manager import RuleManager
 from tinycoder.shell_executor import ShellExecutor
 from tinycoder.ui.console_interface import ring_bell, prompt_user_input
 from tinycoder.ui.log_formatter import STYLES, COLORS as FmtColors, RESET
-from tinycoder.ui.markdown_formatter import MarkdownFormatter
 from tinycoder.ui.session_summary import format_session_summary
 import tinycoder.config as config
 from tinycoder.docker_manager import DockerManager
+from tinycoder.docker_automation import DockerAutomation
 
 
 @dataclass
@@ -102,6 +97,13 @@ class App:
             client=self.client,
             model=self.model,
             style=self.style,
+            logger=self.logger
+        )
+
+        # Initialize Docker automation
+        self.docker_automation = DockerAutomation(
+            docker_manager=self.docker_manager,
+            file_manager=self.file_manager,
             logger=self.logger
         )
 
@@ -228,131 +230,8 @@ class App:
         self.logger.debug("CodeApplier initialized.")
 
     def _handle_docker_automation(self, modified_files_rel: List[str], non_interactive: bool = False):
-        """
-        After edits are applied, checks for Docker context and automates actions.
-        - Restarts services that don't have live-reload.
-        - Prompts to build if dependency files change.
-        """
-        if not self.docker_manager or not self.docker_manager.is_available or not self.docker_manager.services:
-            self.logger.debug("Docker automation skipped: manager not available or no services found.")
-            return
-
-        modified_files_abs = [self.file_manager.get_abs_path(f) for f in modified_files_rel if self.file_manager.get_abs_path(f)]
-        if not modified_files_abs:
-            return # No valid files to check
-
-        # find_affected_services now returns Dict[str, Set[str]]
-        affected_services_map = self.docker_manager.find_affected_services(modified_files_abs)
-        if not affected_services_map:
-            self.logger.debug("No Docker services affected by file changes.")
-            return
-
-        dependency_files = ["requirements.txt", "pyproject.toml", "package.json", "Pipfile", "Dockerfile"] # Added Dockerfile
-        modified_dep_files = any(Path(f).name.lower() in dependency_files for f in modified_files_rel) # .lower() for Dockerfile
-
-        services_to_build_and_restart = set()
-        services_to_volume_restart_only = set()
-
-        for service_name, reasons in affected_services_map.items():
-            needs_build = False
-            # If any global dep file changed for *any* service, all *affected* services are marked for build.
-            # Or if Dockerfile specific to a service's build context (or the context itself) changes.
-            if modified_dep_files: 
-                # Check if this specific service's Dockerfile or build context is among the changed dependency files
-                service_build_config = self.docker_manager.services.get(service_name, {}).get('build', {})
-                service_build_context_str = None
-                if isinstance(service_build_config, str):
-                    service_build_context_str = service_build_config
-                elif isinstance(service_build_config, dict):
-                    service_build_context_str = service_build_config.get('context')
-                
-                service_dockerfile_str = "Dockerfile" # default
-                if isinstance(service_build_config, dict) and isinstance(service_build_config.get('dockerfile'), str):
-                     service_dockerfile_str = service_build_config.get('dockerfile')
-
-
-                if service_build_context_str and self.docker_manager.root_dir:
-                    service_build_context_path = (self.docker_manager.root_dir / service_build_context_str).resolve()
-                    
-                    # Check if any modified dep file is THE Dockerfile for this service, or within its context
-                    for mod_file_rel in modified_files_rel:
-                        mod_file_abs = self.file_manager.get_abs_path(mod_file_rel)
-                        if not mod_file_abs: continue
-
-                        # Is the modified file the Dockerfile for this service?
-                        # Resolve path to Dockerfile relative to context
-                        dockerfile_abs_path = (service_build_context_path / service_dockerfile_str).resolve()
-                        if mod_file_abs == dockerfile_abs_path:
-                            needs_build = True
-                            self.logger.debug(f"Service '{service_name}' Dockerfile '{service_dockerfile_str}' changed.")
-                            break
-                        # Is a generic dep file (like requirements.txt) inside this service's build context?
-                        if mod_file_abs.name.lower() in dependency_files and mod_file_abs.is_relative_to(service_build_context_path):
-                            needs_build = True
-                            self.logger.debug(f"Dependency file '{mod_file_abs.name}' changed within build context of '{service_name}'.")
-                            break
-                    if needs_build:
-                         self.logger.debug(f"Service '{service_name}' marked for build due to specific dependency change.")
-
-
-            if "build_context" in reasons and not needs_build: # if not already caught by dep check
-                needs_build = True
-                self.logger.debug(f"Service '{service_name}' marked for build due to direct build_context change.")
-
-            if needs_build:
-                services_to_build_and_restart.add(service_name)
-            elif "volume" in reasons: # Only consider for volume restart if not already needing a build
-                if self.docker_manager.is_service_running(service_name):
-                    if not self.docker_manager.has_live_reload(service_name):
-                        services_to_volume_restart_only.add(service_name)
-                    else:
-                        self.logger.info(f"Service '{STYLES['BOLD']}{FmtColors['CYAN']}{service_name}{RESET}' affected by volume change and has live-reload, no automatic restart needed.")
-                else:
-                    self.logger.debug(f"Service '{service_name}' affected by volume change but not running, skipping restart.")
-        
-        if services_to_build_and_restart:
-            sorted_build_services = sorted(list(services_to_build_and_restart))
-            colored_services = [f"{STYLES['BOLD']}{FmtColors['YELLOW']}{s}{RESET}" for s in sorted_build_services]
-            self.logger.warning(
-                f"Services requiring build & restart: {', '.join(colored_services)}"
-            )
-            if non_interactive:
-                self.logger.info("Non-interactive mode: Skipping build & restart prompt. Please manage manually.")
-            else:
-                prompt = f"{FmtColors['YELLOW']}Rebuild and restart affected services ({', '.join(sorted_build_services)}) now? (y/N): {RESET}"
-                confirm = prompt_user_input(prompt).strip().lower()
-
-                if not confirm:  # User cancelled the prompt
-                    self.logger.info("\nBuild & restart cancelled by user.")
-                elif confirm == 'y':
-                    try:
-                        for service in sorted_build_services:
-                            if self.docker_manager.build_service(service):
-                                self.docker_manager.up_service_recreate(service)
-                    except KeyboardInterrupt:
-                        self.logger.info("\nBuild & restart operation cancelled by user.")
-
-            return # Exit after build consideration, regardless of user choice
-
-        # Handle services that only needed a volume-based restart (and weren't built)
-        if services_to_volume_restart_only:
-            sorted_volume_services = sorted(list(services_to_volume_restart_only))
-            colored_services = [f"{STYLES['BOLD']}{FmtColors['CYAN']}{s}{RESET}" for s in sorted_volume_services]
-            self.logger.info(
-                f"Services requiring restart due to volume changes (no live-reload): {', '.join(colored_services)}"
-            )
-            if non_interactive:
-                self.logger.info("Non-interactive mode: Skipping volume-based restart. Please manage manually.")
-            else:
-                try:
-                    # Could add a prompt here too if desired, but for now, auto-restarting these.
-                    # confirm_restart = input(f"Restart services ({', '.join(sorted_volume_services)}) now? (y/N): ").strip().lower()
-                    # if confirm_restart == 'y':
-                    for service in sorted_volume_services:
-                        self.logger.info(f"Service '{STYLES['BOLD']}{FmtColors['CYAN']}{service}{RESET}' is running without apparent live-reload and affected by volume change.")
-                        self.docker_manager.restart_service(service)
-                except (EOFError, KeyboardInterrupt):
-                    self.logger.info("\nVolume restart cancelled by user.")
+        """Handle Docker automation after file modifications."""
+        self.docker_automation.handle_modified_files(modified_files_rel, non_interactive)
 
 
     def _add_initial_files(self, files: List[str]) -> None:
@@ -406,13 +285,6 @@ class App:
         ]
 
         return FormattedText(parts)
-
-    def _update_and_cache_token_breakdown(self) -> None:
-        """
-        Performs the expensive token calculation and caches the result.
-        This should only be called when the context has actually changed.
-        """
-        self.context_manager.update_token_cache()
 
     def _update_and_cache_token_breakdown(self) -> None:
         """
