@@ -37,13 +37,13 @@ class AppFormatter:
         elif total > 15000:
             total_color_class = 'class:bottom-toolbar.medium'
         
-        # Build plain string
+        # Build a more compact, visually appealing toolbar string
         toolbar_str = (
-            f"  Context: {total:,}"
-            f" (Prompt: {token_breakdown.get('prompt_rules', 0):,} | "
-            f"Map: {token_breakdown.get('repo_map', 0):,} | "
-            f"Files: {token_breakdown.get('files', 0):,} | "
-            f"History: {token_breakdown.get('history', 0):,})  "
+            f"  Ctx: {total:,}T  "
+            f"P:{token_breakdown.get('prompt_rules', 0):,}  "
+            f"M:{token_breakdown.get('repo_map', 0):,}  "
+            f"F:{token_breakdown.get('files', 0):,}  "
+            f"H:{token_breakdown.get('history', 0):,}  "
         )
         return toolbar_str
     
