@@ -16,6 +16,7 @@ from prompt_toolkit.utils import get_cwidth
 from tinycoder.chat_history import ChatHistoryManager
 from tinycoder.code_applier import CodeApplier
 from tinycoder.command_handler import CommandHandler
+from tinycoder.context_manager import ContextManager
 from tinycoder.edit_parser import EditParser
 from tinycoder.file_manager import FileManager
 from tinycoder.git_manager import GitManager
@@ -42,7 +43,6 @@ class AppState:
     use_streaming: bool = False
     total_input_tokens: int = 0
     total_output_tokens: int = 0
-    cached_token_breakdown: Dict[str, int] = field(default_factory=dict)
 
 
 class App:
@@ -85,6 +85,16 @@ class App:
         self.prompt_session = prompt_session
         self.style = style
 
+        # Initialize context manager
+        self.context_manager = ContextManager(
+            file_manager=self.file_manager,
+            prompt_builder=self.prompt_builder,
+            repo_map=self.repo_map,
+            rule_manager=self.rule_manager,
+            history_manager=self.history_manager,
+            logger=self.logger
+        )
+
         # Initialize LLM response processor
         self.llm_processor = LLMResponseProcessor(
             client=self.client,
@@ -101,19 +111,13 @@ class App:
 
     def toggle_repo_map(self, state: bool) -> None:
         """Sets the state for including the repo map in prompts."""
-        self.state.include_repo_map = state
+        self.context_manager.set_repo_map_state(state)
         status_str = f"{FmtColors['GREEN']}enabled{RESET}" if state else f"{FmtColors['YELLOW']}disabled{RESET}"
         self.logger.info(f"Repository map inclusion in prompts is now {status_str}.")
 
     def _get_current_repo_map_string(self) -> str:
         """Generates and returns the current repository map string."""
-        chat_files_rel = self.file_manager.get_files() # Set[str] of relative paths
-        # Ensure repo_map is initialized and has a root before generating
-        if self.repo_map and self.repo_map.root:
-            return self.repo_map.generate_map(chat_files_rel)
-        else:
-            self.logger.warning("RepoMap not fully initialized, cannot generate map string.")
-            return "Repository map is not available at this moment."
+        return self.context_manager.get_current_repo_map_string()
 
     def _ask_llm_for_files_based_on_context(self, custom_instruction: Optional[str] = None) -> None:
         """
@@ -379,7 +383,7 @@ class App:
         Generates the formatted text for the bottom toolbar from cached token context.
         This function must be extremely fast as it's called on every redraw.
         """
-        breakdown = self.state.cached_token_breakdown
+        breakdown = self.context_manager.get_cached_token_breakdown()
         total = breakdown.get("total", 0)
         
         # Determine color based on total tokens
@@ -406,52 +410,14 @@ class App:
         Performs the expensive token calculation and caches the result.
         This should only be called when the context has actually changed.
         """
-        self.state.cached_token_breakdown = self._get_current_context_token_breakdown()
-        self.logger.debug("Token context breakdown cache updated.")
-        
-    def _get_current_context_token_breakdown(self) -> Dict[str, int]:
-        """Calculates the approximate token count breakdown for the current context."""
-        # This is a helper function to estimate tokens from characters.
-        def count_tokens(text: str) -> int:
-            return int(len(text) / 4)
+        self.context_manager.update_token_cache()
 
-        # 1. System Prompt (Base + Rules)
-        active_rules = self.rule_manager.get_active_rules_content()
-        # Build system prompt WITHOUT repo map to isolate its size
-        base_system_prompt_content = self.prompt_builder.build_system_prompt(
-            self.state.mode,
-            active_rules,
-            include_map=False # Exclude map for this part of calculation
-        )
-        system_prompt_tokens = count_tokens(base_system_prompt_content)
-
-        # 2. Repo Map
-        repo_map_tokens = 0
-        if self.state.include_repo_map:
-            # Generate the repo map separately to get its size
-            chat_files_rel = self.file_manager.get_files()
-            repo_map_str = self.repo_map.generate_map(chat_files_rel)
-            repo_map_tokens = count_tokens(repo_map_str)
-
-        # 3. File Context
-        file_context_message = self.prompt_builder.get_file_content_message()
-        file_context_content = file_context_message['content'] if file_context_message else ""
-        file_context_tokens = count_tokens(file_context_content)
-
-        # 4. History
-        current_history = self.history_manager.get_history()
-        history_content = "\n".join(msg['content'] for msg in current_history)
-        history_tokens = count_tokens(history_content)
-
-        total_tokens = system_prompt_tokens + repo_map_tokens + file_context_tokens + history_tokens
-
-        return {
-            "total": total_tokens,
-            "prompt_rules": system_prompt_tokens,
-            "repo_map": repo_map_tokens,
-            "files": file_context_tokens,
-            "history": history_tokens,
-        }
+    def _update_and_cache_token_breakdown(self) -> None:
+        """
+        Performs the expensive token calculation and caches the result.
+        This should only be called when the context has actually changed.
+        """
+        self.context_manager.update_token_cache()
 
     def _send_to_llm(self) -> Optional[str]:
         """Sends the current chat history and file context to the LLM."""
@@ -466,7 +432,7 @@ class App:
         system_prompt_content = self.prompt_builder.build_system_prompt(
             self.state.mode,
             active_rules,
-            self.state.include_repo_map      # Pass the toggle state
+            self.context_manager.include_repo_map      # Pass the toggle state
         )
         system_prompt_msg = {"role": "system", "content": system_prompt_content}
 
@@ -823,7 +789,7 @@ class App:
 
         # Use PromptBuilder to build the identify files prompt, passing repo map state
         system_prompt = self.prompt_builder.build_identify_files_prompt(
-            include_map=self.state.include_repo_map
+            include_map=self.context_manager.include_repo_map
         )
 
         history_for_files = [{"role": "user", "content": instruction}]
