@@ -22,7 +22,7 @@ from tinycoder.repo_map import RepoMap
 from tinycoder.rule_manager import RuleManager
 from tinycoder.shell_executor import ShellExecutor
 from tinycoder.ui.console_interface import ring_bell, prompt_user_input
-from tinycoder.ui.log_formatter import STYLES, COLORS as FmtColors, RESET
+from tinycoder.ui.log_formatter import STYLES
 from tinycoder.ui.session_summary import format_session_summary
 from tinycoder.ui.app_formatter import AppFormatter
 from tinycoder.docker_manager import DockerManager
@@ -143,7 +143,7 @@ class App:
             last_user_message = next((msg['content'] for msg in reversed(history) if msg['role'] == 'user' and msg['content'] and not msg['content'].startswith("(placeholder)")), None)
             if last_user_message:
                 instruction = last_user_message
-                self.logger.info(f"{FmtColors['BLUE']}Suggesting files based on the last user message in history.{RESET}")
+                self.logger.info(self.formatter.format_info("Suggesting files based on the last user message in history."))
             else:
                 self.logger.warning("No custom instruction provided and no suitable user history found to base suggestions on.")
                 return
@@ -157,12 +157,12 @@ class App:
         if suggested_files:
             self.logger.info("LLM suggested the following files (relative to project root):")
             for i, fname in enumerate(suggested_files):
-                self.logger.info(f"  {i+1}. {FmtColors['CYAN']}{fname}{RESET}")
+                self.logger.info(f"  {i+1}. {self.formatter.format_filename(fname)}")
 
-            confirm_prompt = f"{FmtColors['YELLOW']}Add files to context? (y/N, or list indices like '1,3'): {RESET}"
+            confirm_prompt = f"{self.formatter.format_warning('Add files to context? (y/N, or list indices like \'1,3\'): ')}"
             confirm = prompt_user_input(confirm_prompt).strip().lower()
             if not confirm: # User cancelled
-                self.logger.info(f"{FmtColors['YELLOW']}\nFile addition cancelled by user.{RESET}")
+                self.logger.info(self.formatter.format_warning("\nFile addition cancelled by user."))
                 return
 
             files_to_add = []
@@ -189,7 +189,7 @@ class App:
                         f"Added {added_count} file(s) to context from LLM suggestion: {', '.join(successfully_added_fnames)}"
                     )
                     colored_fnames = self.formatter.format_success_files(successfully_added_fnames)
-                    self.logger.debug(f"Added {added_count} file(s) to context: {colored_fnames}")
+                    self.logger.debug(f"Added {added_count} file(s) to context: {self.formatter.format_success_files(successfully_added_fnames)}")
             else:
                 self.logger.debug("No suggested files were added to the context.")
         elif instruction: # _ask_llm_for_files was called but returned no files
@@ -365,7 +365,7 @@ class App:
                 # Warn if a specifically requested path doesn't exist
                 if paths_to_commit is not None:
                     self.logger.warning(
-                        f"Requested commit path {FmtColors['CYAN']}{fname}{RESET} does not exist on disk, skipping.",
+                        f"Requested commit path {self.formatter.format_filename(fname)} does not exist on disk, skipping.",
                     )
                 # Don't warn if iterating all context files and one is missing (it might have been deleted)
 
@@ -400,7 +400,7 @@ class App:
             return
 
         if last_hash not in self.state.coder_commits:
-            self.logger.error(f"Last commit {FmtColors['YELLOW']}{last_hash}{RESET} was not made by {STYLES['BOLD']}{config.APP_NAME}{RESET}.")
+            self.logger.error(f"Last commit {self.formatter.format_warning(last_hash)} was not made by {self.formatter.format_bold(config.APP_NAME)}.")
             self.logger.info("You can manually undo with 'git reset HEAD~1'")
             return
 
@@ -424,7 +424,7 @@ class App:
         if not requested_files_from_llm:
             return False
 
-        self.logger.info(f"{STYLES['BOLD']}{FmtColors['BLUE']}LLM requested additional file context:{RESET}")
+        self.logger.info(f"{self.formatter.format_bold(self.formatter.format_info('LLM requested additional file context:'))}")
         
         valid_files_to_potentially_add = []
         non_existent_files_requested = []
@@ -441,13 +441,13 @@ class App:
                 non_existent_files_requested.append(fname_rel)
 
         if non_existent_files_requested:
-            formatted_non_existent = [f"{FmtColors['RED']}{fname}{RESET}" for fname in non_existent_files_requested]
+            formatted_non_existent = [self.formatter.format_error(fname) for fname in non_existent_files_requested]
             self.logger.warning(
                 f"LLM requested non-existent files: {', '.join(formatted_non_existent)}"
             )
         
         if already_in_context_files:
-            formatted_already_in_context = [f"{FmtColors['GREY']}{fname}{RESET}" for fname in already_in_context_files]
+            formatted_already_in_context = [self.formatter.format_info(fname) for fname in already_in_context_files]
             self.logger.info(
                 f"Requested files already in context: {', '.join(formatted_already_in_context)}"
             )
@@ -467,15 +467,15 @@ class App:
                  self.logger.debug("No new, existing files to add from LLM's request.")
             return False
 
-        self.logger.info(f"{FmtColors['BLUE']}LLM suggests adding these existing files to context:{RESET}")
+        self.logger.info(self.formatter.format_info("LLM suggests adding these existing files to context:"))
         for i, fname in enumerate(valid_files_to_potentially_add):
-            self.logger.info(f"  {i+1}. {FmtColors['CYAN']}{fname}{RESET}")
+            self.logger.info(f"  {i+1}. {self.formatter.format_filename(fname)}")
         
-        confirm_prompt = f"{FmtColors['YELLOW']}Add these files to context? (y/N, or list indices like '1,3'): {RESET}"
+        confirm_prompt = f"{self.formatter.format_warning('Add these files to context? (y/N, or list indices like \'1,3\'): ')}"
         confirm = (await self._prompt_for_confirmation(confirm_prompt)).strip().lower()
 
         if not confirm: # Handles cancellation from prompt_user_input
-            self.logger.info(f"{FmtColors['YELLOW']}\nFile addition (from LLM request) cancelled by user.{RESET}")
+            self.logger.info(self.formatter.format_warning("\nFile addition (from LLM request) cancelled by user."))
             self.state.reflected_message = "User cancelled the addition of requested files. Please advise on how to proceed or if you can continue without them."
             return True
 
@@ -498,7 +498,7 @@ class App:
                     successfully_added_fnames.append(fname)
             
             if added_count > 0:
-                colored_successfully_added_fnames = self.formatter.format_success_files(successfully_added_fnames)
+                colored_successfully_added_fnames = self.formatter.format_filename_list(successfully_added_fnames)
                 tool_message = f"Added {added_count} file(s) to context from LLM request: {colored_successfully_added_fnames}"
                 self.history_manager.save_message_to_file_only("tool", tool_message)
                 reflection_content = (
@@ -585,7 +585,7 @@ class App:
                     combined_errors = "\n".join(error_messages)
                     self.logger.error(combined_errors)
 
-                    fix_lint = await self._prompt_for_confirmation(f"{FmtColors['YELLOW']}Attempt to fix lint errors? (y/N): {RESET}")
+                    fix_lint = await self._prompt_for_confirmation(f"{self.formatter.format_warning('Attempt to fix lint errors? (y/N): ')}")
                     if fix_lint.lower() == "y":
                         self.state.reflected_message = combined_errors
             
@@ -657,9 +657,8 @@ class App:
         Returns True if input was consumed, False otherwise.
         """
         if user_message.startswith("/"):
-            if not await self._handle_command(user_message):
-                return True  # Signal to exit
-            return True      # Input consumed
+            status = await self._handle_command(user_message)
+            return status  # Return the actual status from command handling
         if user_message.startswith("!"):
             self.shell_executor.execute(user_message, False)
             return True
@@ -674,7 +673,7 @@ class App:
         if self.file_manager.get_files():
             return
 
-        self.logger.info(f"No files in context for {STYLES['BOLD']}{FmtColors['GREEN']}CODE{RESET} mode.")
+        self.logger.info(f"No files in context for {self.formatter.format_bold(self.formatter.format_success('CODE'))} mode.")
         suggested_files = self._ask_llm_for_files(user_message)
         added_files_count = 0
         if suggested_files:
@@ -756,7 +755,7 @@ class App:
         self._update_and_cache_token_breakdown()
 
         # Use logger for startup info, which has its own color formatting.
-        self.logger.info(f"  Model: {FmtColors['GREEN']}{STYLES['BOLD']}{self.model}{RESET}")
+        self.logger.info(f"  Model: {self.formatter.format_success(self.formatter.format_bold(self.model))}")
         self.logger.info("  Type /help for commands, or !<cmd> to run shell commands.\n")
 
         while True:
