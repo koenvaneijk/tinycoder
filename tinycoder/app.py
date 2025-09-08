@@ -23,7 +23,7 @@ from tinycoder.prompt_builder import PromptBuilder
 from tinycoder.repo_map import RepoMap
 from tinycoder.rule_manager import RuleManager
 from tinycoder.shell_executor import ShellExecutor
-from tinycoder.ui.console_interface import ring_bell
+from tinycoder.ui.console_interface import ring_bell, prompt_user_input
 from tinycoder.ui.log_formatter import STYLES, COLORS as FmtColors, RESET
 import tinycoder.config as config
 from tinycoder.docker_manager import DockerManager

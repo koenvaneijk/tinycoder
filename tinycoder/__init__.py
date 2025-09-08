@@ -1,4 +1,4 @@
-from tinycoder.app import App
+from tinycoder.app_builder import AppBuilder
 import os
 import argparse
 import asyncio
@@ -142,7 +142,8 @@ def main():
         model_str = load_user_preference_model()
 
     # Initialize the app
-    coder = App(model=model_str, files=args.files, continue_chat=args.continue_chat, verbose=args.verbose)
+    builder = AppBuilder(model=model_str, files=args.files, continue_chat=args.continue_chat, verbose=args.verbose)
+    coder = builder.build()
 
     # Save the model preference for next time
     save_user_preference(coder.client.__class__.__name__, coder.model)
