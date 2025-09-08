@@ -1,6 +1,5 @@
 import logging
-import os
-import re # Added for markdown formatting
+import re
 import sys
 import traceback
 from dataclasses import dataclass, field
@@ -8,9 +7,7 @@ from pathlib import Path
 from typing import List, Set, Dict, Optional, Tuple
 
 from prompt_toolkit import PromptSession, print_formatted_text
-from prompt_toolkit.completion import Completer
 from prompt_toolkit.formatted_text import FormattedText
-from prompt_toolkit.history import FileHistory
 from prompt_toolkit.styles import Style
 
 from tinycoder.chat_history import ChatHistoryManager
@@ -19,18 +16,15 @@ from tinycoder.command_handler import CommandHandler
 from tinycoder.edit_parser import EditParser
 from tinycoder.file_manager import FileManager
 from tinycoder.git_manager import GitManager
-from tinycoder.file_manager import FileManager
+from tinycoder.input_preprocessor import InputPreprocessor
 from tinycoder.llms.base import LLMClient
-from tinycoder.llms import create_llm_client
 from tinycoder.llms.pricing import get_model_pricing
 from tinycoder.prompt_builder import PromptBuilder
 from tinycoder.repo_map import RepoMap
 from tinycoder.rule_manager import RuleManager
 from tinycoder.shell_executor import ShellExecutor
-from tinycoder.input_preprocessor import InputPreprocessor
-from tinycoder.ui.console_interface import ring_bell, prompt_user_input
-from tinycoder.ui.command_completer import PTKCommandCompleter
-from tinycoder.ui.log_formatter import ColorLogFormatter, STYLES, COLORS as FmtColors, RESET
+from tinycoder.ui.console_interface import ring_bell
+from tinycoder.ui.log_formatter import STYLES, COLORS as FmtColors, RESET
 import tinycoder.config as config
 from tinycoder.docker_manager import DockerManager
 
@@ -48,258 +42,50 @@ class AppState:
 
 
 class App:
-    def __init__(self, model: Optional[str], files: List[str], continue_chat: bool, verbose: bool = False):
-        """Initializes the TinyCoder application."""
-        self.verbose = verbose
-        self._setup_logging()
-        self._init_llm_client(model)
-        self._setup_git()
-        self._init_core_managers(continue_chat)
-        self._setup_docker() # Initialize Docker manager
-        self._init_prompt_builder()
-        self._setup_rules_manager()
-        self._init_input_preprocessor() # Initialize InputPreprocessor
-        self._init_prompt_session() # Initialize PromptSession and styles
-        self._reconfigure_logging_for_ptk() # Switch to prompt_toolkit-aware logging
+    """The main application class, responsible for runtime logic and orchestration."""
+    def __init__(
+        self,
+        logger: logging.Logger,
+        client: LLMClient,
+        model: str,
+        git_manager: GitManager,
+        git_root: Optional[str],
+        file_manager: FileManager,
+        history_manager: ChatHistoryManager,
+        repo_map: RepoMap,
+        docker_manager: Optional[DockerManager],
+        prompt_builder: PromptBuilder,
+        rule_manager: RuleManager,
+        input_preprocessor: InputPreprocessor,
+        edit_parser: EditParser,
+        shell_executor: ShellExecutor,
+        prompt_session: PromptSession,
+        style: Style,
+    ):
+        """Initializes the App with its dependencies."""
         self.state = AppState()
-        self.logger.debug("Basic app state initialized (commits, mode, lint status, repo map toggle, usage tracking).")
+        self.logger = logger
+        self.client = client
+        self.model = model
+        self.git_manager = git_manager
+        self.git_root = git_root
+        self.file_manager = file_manager
+        self.history_manager = history_manager
+        self.repo_map = repo_map
+        self.docker_manager = docker_manager
+        self.prompt_builder = prompt_builder
+        self.rule_manager = rule_manager
+        self.input_preprocessor = input_preprocessor
+        self.edit_parser = edit_parser
+        self.shell_executor = shell_executor
+        self.prompt_session = prompt_session
+        self.style = style
+
+        # Initialize components that depend on the App instance (`self`)
         self._init_command_handler()
-        self._init_app_components()
-        self._log_final_status()
-        self._add_initial_files(files)
+        self._init_code_applier()
 
-
-    def _setup_logging(self) -> None:
-        """Configures the root logger with colored output."""
-        root_logger = logging.getLogger()
-
-        # Set root logger level based on verbose flag
-        root_logger.setLevel(logging.DEBUG if self.verbose else logging.INFO)
-
-        # Remove existing handlers to prevent duplicates
-        for handler in root_logger.handlers[:]:
-            root_logger.removeHandler(handler)
-
-        ch = logging.StreamHandler(sys.stdout)
-        # Set stream handler level based on verbose flag
-        ch.setLevel(logging.DEBUG if self.verbose else logging.INFO)
-
-        # Use terminal default color for INFO level messages
-        log_format_info = "%(message)s"
-        log_format_debug = f"{FmtColors['GREY']}DEBUG:{RESET} %(message)s"
-        log_format_warn = f"{STYLES['BOLD']}{FmtColors['YELLOW']}WARNING:{RESET} %(message)s"
-        log_format_error = f"{STYLES['BOLD']}{FmtColors['RED']}ERROR:{RESET} {FmtColors['RED']}%(message)s{RESET}"
-        log_format_critical = f"{STYLES['BOLD']}{FmtColors['RED']}CRITICAL:{RESET} {STYLES['BOLD']}{FmtColors['RED']}%(message)s{RESET}"
-        default_log_format = "%(levelname)s: %(message)s"
-
-        formatter = ColorLogFormatter(
-            fmt=default_log_format,
-            level_formats={
-                logging.DEBUG: log_format_debug,
-                logging.INFO: log_format_info,
-                logging.WARNING: log_format_warn,
-                logging.ERROR: log_format_error,
-                logging.CRITICAL: log_format_critical,
-            },
-            use_color=None # Auto-detect TTY and NO_COLOR env var
-        )
-        ch.setFormatter(formatter)
-        root_logger.addHandler(ch)
-
-        self.logger = logging.getLogger(__name__)
-        self.logger.debug("Logging setup complete.")
-
-    def _init_llm_client(self, model: Optional[str]) -> None:
-        """Initializes the LLM client based on the provided model name."""
-        try:
-            self.client: LLMClient = create_llm_client(model)
-            self.model: Optional[str] = self.client.model # Get actual model used
-            self.logger.debug(f"LLM Client initialized with model: {self.model}")
-        except ValueError as e:
-            self.logger.error(f"Failed to initialize LLM client: {e}", exc_info=True)
-            print(f"{FmtColors['RED']}Error: Failed to initialize LLM client. {e}{RESET}", file=sys.stderr)
-            print("Please check model name or API key environment variables.", file=sys.stderr)
-            sys.exit(1)
-
-    def _setup_git(self) -> None:
-        """Initializes GitManager, checks for Git, finds root, and optionally initializes a repo."""
-        self.git_manager = GitManager()
-        self.git_root: Optional[str] = None # Initialize git_root to None
-
-        if not self.git_manager.is_git_available():
-            self.logger.warning("Git command not found. Proceeding without Git integration.")
-            return # Early exit if Git is not available
-
-        # Git is available, check for repo
-        self.git_root = self.git_manager.get_root()
-
-        if self.git_root is None:
-            # Git is available, but no .git found in CWD or parents
-            self.logger.warning(
-                f"Git is available, but no .git directory found starting from {Path.cwd()}."
-            )
-            response = prompt_user_input(f"{FmtColors['YELLOW']}Initialize a new Git repository here? (y/N): {RESET}")
-
-            if response.lower() == 'y':
-                initialized = self.git_manager.initialize_repo()
-                if initialized:
-                    self.git_root = self.git_manager.get_root() # Re-fetch the root after init
-                    if self.git_root:
-                        self.logger.info(f"Git repository initialized. Root: {FmtColors['CYAN']}{self.git_root}{RESET}")
-                    else:
-                        # Should not happen if initialize_repo succeeded, but handle defensively
-                        self.logger.error("Git initialization reported success, but failed to find root afterwards. Proceeding without Git integration.")
-                else:
-                    self.logger.error("Git initialization failed. Proceeding without Git integration.")
-            else:
-                self.logger.warning("Proceeding without Git integration.")
-        else:
-            self.logger.debug(f"Found existing Git repository. Root: {FmtColors['CYAN']}{self.git_root}{RESET}")
-            # If git_root was found initially, we don't need to prompt or initialize
-
-        # self.git_root is now set correctly (or None)
-
-    def _init_core_managers(self, continue_chat: bool) -> None:
-        """Initializes FileManager, ChatHistoryManager, and RepoMap."""
-        # These depend on self.git_root potentially being set by _setup_git()
-        self.file_manager = FileManager(self.git_root, prompt_user_input)
-        self.history_manager = ChatHistoryManager(continue_chat=continue_chat)
-        self.repo_map = RepoMap(self.git_root) # Pass the final git_root
-        self.logger.debug("Core managers (File, History, RepoMap) initialized.")
-
-    def _setup_docker(self) -> None:
-        """Initializes the DockerManager if Docker is available."""
-        # Depends on self.git_root being set, or cwd if not.
-        project_root = Path(self.git_root) if self.git_root else Path.cwd()
-        try:
-            self.docker_manager: Optional[DockerManager] = DockerManager(project_root, self.logger)
-            if not self.docker_manager.is_available:
-                self.docker_manager = None # Ensure it's None if not fully available
-                self.logger.debug("Docker integration disabled.")
-            else:
-                self.logger.debug("DockerManager initialized successfully.")
-        except Exception as e:
-            self.logger.warning(f"Could not initialize Docker integration: {e}", exc_info=self.verbose)
-            self.docker_manager = None
-
-    def _init_prompt_builder(self) -> None:
-        """Initializes the PromptBuilder."""
-        # Depends on FileManager and RepoMap
-        self.prompt_builder = PromptBuilder(self.file_manager, self.repo_map)
-        self.logger.debug("PromptBuilder initialized.")
-
-    def _setup_rules_manager(self) -> None:
-        """Initializes the RuleManager."""
-        project_identifier = self._get_project_identifier()
-        self.logger.debug(f"Project identifier for rules: {project_identifier}")
-
-        config_dir = config.get_config_dir()
-        rules_config_path = config_dir / "rules_config.json"
-        self.logger.debug(f"Rules configuration path: {rules_config_path}")
-
-        # Determine base directory for custom rules (git_root or cwd)
-        base_dir_for_rules = Path(self.git_root) if self.git_root else Path.cwd()
-
-        self.rule_manager = RuleManager(
-            project_identifier=project_identifier,
-            rules_config_path=rules_config_path,
-            base_dir=base_dir_for_rules,
-            logger=self.logger # Pass the App's logger instance
-        )
-        self.logger.debug("RuleManager initialized.")
-
-    def _reconfigure_logging_for_ptk(self) -> None:
-        """
-        Swaps the initial StreamHandler with a prompt_toolkit-based handler
-        to ensure logging integrates smoothly with the prompt session.
-        This is called after startup messages are logged.
-        """
-        root_logger = logging.getLogger()
-        old_handler = None
-        
-        # Find the existing stream handler
-        for handler in root_logger.handlers[:]:
-            if isinstance(handler, logging.StreamHandler):
-                old_handler = handler
-                break
-        
-        if not old_handler:
-            self.logger.debug("No existing StreamHandler found to replace. Skipping log reconfiguration.")
-            return
-
-        # Create the new handler and give it the same formatter and level as the old one
-        from tinycoder.ui.log_formatter import PromptToolkitLogHandler
-        ptk_handler = PromptToolkitLogHandler(self.style)
-        ptk_handler.setFormatter(old_handler.formatter)
-        ptk_handler.setLevel(old_handler.level)
-        
-        # Replace the old handler with the new one
-        root_logger.removeHandler(old_handler)
-        root_logger.addHandler(ptk_handler)
-
-        self.logger.debug("Logging reconfigured to use PromptToolkitLogHandler.")
-
-    def _init_prompt_session(self) -> None:
-        """Initializes the prompt_toolkit session, completer, and style."""
-        history_file = config.get_history_file_path()
-
-        # Setup completer
-        self.completer: Optional[Completer] = PTKCommandCompleter(self.file_manager, self.git_manager)
-
-        self.prompt_session = PromptSession(
-            history=FileHistory(str(history_file)),
-            completer=self.completer,
-            multiline=True,
-            prompt_continuation="... "
-        )
-        self.logger.debug("Prompt session initialized with history and completer.")
-
-        # Central style for the application
-        self.style = Style.from_dict({
-            # Prompt
-            'prompt.mode': 'bold fg:ansigreen',
-            'prompt.separator': 'fg:ansibrightblack',
-            'rprompt.tokens.low': 'fg:ansigreen',
-            'rprompt.tokens.medium': 'fg:ansiyellow',
-            'rprompt.tokens.high': 'fg:ansired',
-            'rprompt.text': 'fg:ansibrightblack',
-            # Bottom Toolbar
-            'bottom-toolbar':          'bg:#222222 fg:#aaaaaa',      # Base style for the toolbar, single background
-            'bottom-toolbar.low':      'bg:#222222 fg:ansigreen bold', # Total tokens (low)
-            'bottom-toolbar.medium':   'bg:#222222 fg:ansiyellow bold', # Total tokens (medium)
-            'bottom-toolbar.high':     'bg:#222222 fg:ansired bold',   # Total tokens (high)
-            # Assistant & Markdown
-            'assistant.header': 'bold fg:ansicyan',
-            'markdown.h1': 'bold fg:ansiblue',
-            'markdown.h2': 'bold fg:ansimagenta',
-            'markdown.h3': 'bold fg:ansicyan',
-            'markdown.bold': 'bold',
-            'markdown.code': 'fg:ansiyellow',
-            'markdown.code-block': 'fg:ansigreen',
-            'markdown.list': 'fg:ansicyan',
-            # Diffs
-            'diff.header': 'bold',
-            'diff.plus': 'fg:ansigreen',
-            'diff.minus': 'fg:ansired',
-            # Logging
-            'log.debug': 'fg:#888888',
-            'log.info': '', # Default terminal color
-            'log.warning': 'fg:ansiyellow',
-            'log.error': 'fg:ansired',
-            'log.critical': 'bold fg:ansired',
-        })
-        self.logger.debug("Application style defined.")
-
-
-    def _init_input_preprocessor(self) -> None:
-        """Initializes the InputPreprocessor."""
-        self.input_preprocessor = InputPreprocessor(
-            logger=self.logger,
-            file_manager=self.file_manager,
-            git_manager=self.git_manager,
-            repo_map=self.repo_map
-        )
-        self.logger.debug("InputPreprocessor initialized.")
+        self.logger.debug("App instance fully initialized.")
 
     def toggle_repo_map(self, state: bool) -> None:
         """Sets the state for including the repo map in prompts."""
@@ -388,8 +174,7 @@ class App:
 
 
     def _init_command_handler(self) -> None:
-        """Initializes the CommandHandler."""
-        # Depends on several managers and methods
+        """Initializes the CommandHandler, which depends on the app instance."""
         self.command_handler = CommandHandler(
             file_manager=self.file_manager,
             git_manager=self.git_manager,
@@ -402,7 +187,7 @@ class App:
             git_commit_func=self._git_add_commit,
             git_undo_func=self._git_undo,
             app_name=config.APP_NAME,
-            enable_rule_func=self.rule_manager.enable_rule, 
+            enable_rule_func=self.rule_manager.enable_rule,
             disable_rule_func=self.rule_manager.disable_rule,
             list_rules_func=self.rule_manager.list_rules,
             toggle_repo_map_func=self.toggle_repo_map,
@@ -414,22 +199,15 @@ class App:
         )
         self.logger.debug("CommandHandler initialized.")
 
-    def _init_app_components(self) -> None:
-        """Initializes EditParser, CodeApplier, and ShellExecutor."""
-        self.edit_parser = EditParser()
+    def _init_code_applier(self) -> None:
+        """Initializes the CodeApplier, which depends on the app instance."""
         self.code_applier = CodeApplier(
             file_manager=self.file_manager,
             git_manager=self.git_manager,
-            input_func=self._prompt_for_confirmation, # Use centralized input for confirmations
-            style=self.style, # Pass style for diff printing
+            input_func=self._prompt_for_confirmation,
+            style=self.style,
         )
-        # Initialize ShellExecutor
-        self.shell_executor = ShellExecutor(
-            logger=self.logger,
-            history_manager=self.history_manager,
-            git_root=self.git_root
-        )
-        self.logger.debug("App components (Parser, Applier, ShellExecutor) initialized.")
+        self.logger.debug("CodeApplier initialized.")
 
     def _handle_docker_automation(self, modified_files_rel: List[str], non_interactive: bool = False):
         """
@@ -559,38 +337,6 @@ class App:
                     self.logger.info("\nVolume restart cancelled by user.")
 
 
-    def _log_final_status(self) -> None:
-        """Logs the final Git and Docker integration status after all setup."""
-        if not self.git_manager.is_git_available():
-            # Warning already logged during init
-            self.logger.debug("Final check: Git is unavailable. Git integration disabled.")
-        elif not self.git_root:
-            # Git is available, but no repo was found or initialized
-            self.logger.warning("Final check: Not inside a git repository. Git integration disabled.")
-        else:
-            # Git is available and we have a root
-            self.logger.debug(f"Final check: Git repository root confirmed: {FmtColors['CYAN']}{self.git_root}{RESET}")
-            # Ensure RepoMap knows the root (should be set by _init_core_managers)
-            if self.repo_map.root is None: # Defensive check
-                 self.logger.warning("RepoMap root was unexpectedly None, attempting to set.")
-                 self.repo_map.root = Path(self.git_root)
-            elif str(self.repo_map.root.resolve()) != str(Path(self.git_root).resolve()):
-                self.logger.warning(f"Mismatch between GitManager root ({FmtColors['CYAN']}{self.git_root}{RESET}) and RepoMap root ({FmtColors['CYAN']}{self.repo_map.root}{RESET}). Using GitManager root.")
-                self.repo_map.root = Path(self.git_root)
-        
-        # Docker part
-        if self.docker_manager and self.docker_manager.is_available:
-            self.logger.debug("Final check: Docker integration is active.")
-            if self.docker_manager.compose_file:
-                self.logger.debug(f"Using compose file: {FmtColors['CYAN']}{self.docker_manager.compose_file}{RESET}")
-            # Check for missing volume mounts for any initial files
-            if self.file_manager.get_files():
-                files_in_context_abs = [self.file_manager.get_abs_path(f) for f in self.file_manager.get_files() if self.file_manager.get_abs_path(f)]
-                self.docker_manager.check_for_missing_volume_mounts(files_in_context_abs)
-        else:
-            self.logger.debug("Final check: Docker integration is disabled.")
-
-
     def _add_initial_files(self, files: List[str]) -> None:
         """Adds initial files specified via command line arguments."""
         if files:
@@ -603,14 +349,6 @@ class App:
             self.logger.debug(f"Successfully added {added_count} initial file(s).")
         else:
             self.logger.debug("No initial files specified.")
-
-
-    def _get_project_identifier(self) -> str:
-        """Returns the git root path if available, otherwise the current working directory path."""
-        if self.git_root:
-            return str(Path(self.git_root).resolve())
-        else:
-            return str(Path.cwd().resolve())
 
     async def _prompt_for_confirmation(self, prompt_text: str) -> str:
         """Async user prompt for confirmations within the main app loop."""
