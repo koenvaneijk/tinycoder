@@ -558,6 +558,7 @@ class App:
                                 # Calculate lines for the streamed content
                                 content_lines_count = 0
                                 if response_content:
+                                    # Start with 1 line if there's any content
                                     content_lines_count = 1
                                     current_line_length = 0
                                     for char in response_content:
@@ -571,6 +572,13 @@ class App:
                                                 current_line_length = char_width
                                             else:
                                                 current_line_length += char_width
+                                    
+                                    # After the loop, check for a soft wrap on the very last line.
+                                    # This happens if content doesn't end with \n and the last line is full.
+                                    if not response_content.endswith('\n') and current_line_length > 0 and current_line_length % width == 0:
+                                        # This is ambiguous, but many terminals will move the cursor
+                                        # to the next line, so we need to account for it.
+                                        content_lines_count += 1
                                 
                                 # Total lines to move up: header (1) + content lines.
                                 total_lines_up = 1 + content_lines_count
@@ -1033,28 +1041,34 @@ class App:
         formatted_text = []
         in_code_block = False
 
-        for line in markdown_text.splitlines():
+        # Use split('\n') to correctly handle trailing newlines.
+        lines = markdown_text.split('\n')
+        for i, line in enumerate(lines):
+            # Re-add the newline character for all but the last part of the split.
+            # This preserves the original text's structure, including any trailing newline.
+            line_with_newline = line if i == len(lines) - 1 else line + '\n'
+
             stripped_line = line.lstrip()
 
             if stripped_line.startswith("```"):
                 in_code_block = not in_code_block
-                formatted_text.append(('class:markdown.code-block', line + '\n'))
+                formatted_text.append(('class:markdown.code-block', line_with_newline))
                 continue
 
             if in_code_block:
-                formatted_text.append(('class:markdown.code-block', line + '\n'))
+                formatted_text.append(('class:markdown.code-block', line_with_newline))
                 continue
 
             if stripped_line.startswith("#"):
                 level = len(stripped_line) - len(stripped_line.lstrip('#'))
                 if stripped_line[level:].startswith(' '):
                     style_class = f'class:markdown.h{min(level, 3)}'
-                    formatted_text.append((style_class, line + '\n'))
+                    formatted_text.append((style_class, line_with_newline))
                     continue
             
             # This part is a simplification. A real markdown parser would be needed for complex cases.
             # For now, we just append the line. Further regex for bold/italic could be added here.
-            formatted_text.append(('', line + '\n'))
+            formatted_text.append(('', line_with_newline))
 
         return formatted_text
 
