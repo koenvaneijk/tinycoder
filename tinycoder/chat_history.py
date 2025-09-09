@@ -2,7 +2,7 @@ import os
 import re
 import logging
 import datetime
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 # Default filename for the chat history
 HISTORY_FILE: str = ".tinycoder.chat.history.md"
@@ -19,15 +19,13 @@ class ChatHistoryManager:
         self,
         continue_chat: bool = False,
         history_filename: str = HISTORY_FILE,
-    ):
+    ) -> None:
         """
         Initializes the ChatHistoryManager.
 
         Args:
             continue_chat: If True, attempts to load existing chat history from
                            `history_filename`. If False, starts with an empty history.
-            logger_instance: An optional custom logger instance. If None, uses
-                             the module logger.
             history_filename: The path to the chat history file. Defaults to
                               `HISTORY_FILE`.
         """
