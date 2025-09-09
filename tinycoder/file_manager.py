@@ -144,7 +144,7 @@ class FileManager:
             return True
         else:
             self.fnames.add(rel_path)
-            self.logger.info(f"Added {COLORS['CYAN']}{rel_path}{RESET} to the chat context.")
+            self.logger.info(f"+ {COLORS['CYAN']}{rel_path}{RESET}")
             return True
 
     def drop_file(self, fname: str) -> bool:

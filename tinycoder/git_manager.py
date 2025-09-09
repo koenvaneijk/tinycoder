@@ -282,7 +282,7 @@ class GitManager:
         # Get the commit hash
         commit_hash = self.get_last_commit_hash()
         if commit_hash:
-            self.logger.info(f"Committed changes as {COLORS['GREEN']}{commit_hash}{RESET}")
+            self.logger.info(f"📑 Commit: {COLORS['GREEN']}{commit_hash}{RESET}")
             return commit_hash
         else:
             # Error getting hash already printed by get_last_commit_hash

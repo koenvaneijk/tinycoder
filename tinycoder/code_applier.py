@@ -242,7 +242,7 @@ class CodeApplier:
                                 new_content_normalized,
                             )
                         edited_file_content[rel_path] = new_content_normalized # Update in-memory content
-                        self.logger.info(
+                        self.logger.debug(
                             f"Prepared edit {i+1} for {COLORS['CYAN']}{rel_path}{RESET}"
                         )
                     else:
@@ -296,7 +296,7 @@ class CodeApplier:
                         self.logger.info(f"Successfully created/wrote {COLORS['GREEN']}{rel_path}{RESET}")
                     else:
                         self.logger.info(
-                            f"Successfully saved changes to {COLORS['GREEN']}{rel_path}{RESET}"
+                            f"💾 {COLORS['GREEN']}{rel_path}{RESET}"
                         )
                 else:
                     self.logger.error(
