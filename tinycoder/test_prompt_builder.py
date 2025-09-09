@@ -36,7 +36,7 @@ class TestPromptBuilder(unittest.TestCase):
         prompt = self.builder.build_system_prompt(mode="code", custom_rules_content="", include_map=False)
         self.assertIn("(No files added to chat yet)", prompt)
         self.assertIn("(Repository map generation is disabled by user)", prompt)
-        self.assertIn("You are an expert software developer", prompt)
+        self.assertIn("Act as an expert software developer", prompt)
 
     def test_build_system_prompt_with_files_no_map(self):
         """Test system prompt with files but no repo map."""
