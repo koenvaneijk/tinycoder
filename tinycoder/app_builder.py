@@ -187,14 +187,31 @@ class AppBuilder:
             'diff.header': 'bold', 'diff.plus': 'fg:ansigreen', 'diff.minus': 'fg:ansired',
             'log.debug': 'fg:#888888', 'log.info': '', 'log.warning': 'fg:ansiyellow',
             'log.error': 'fg:ansired', 'log.critical': 'bold fg:ansired',
+            'placeholder': 'fg:#666666',
         })
         self.logger.debug("Application style defined.")
         history_file = config.get_history_file_path()
         completer = PTKCommandCompleter(self.file_manager, self.git_manager)
+        import platform
+        is_mac = platform.system() == "Darwin"
+        is_windows = platform.system() == "Windows"
+        
+        if is_mac:
+            enter_key = "⌘"
+            modifier = "Cmd"
+        elif is_windows:
+            enter_key = "↵"
+            modifier = "Alt+Shift"
+        else:  # Linux and others
+            enter_key = "↵"
+            modifier = "Alt"
+        
+        placeholder_text = f"Write your instructions and submit with {modifier}+{enter_key}"
+        
         self.prompt_session = PromptSession(
             history=FileHistory(str(history_file)), completer=completer,
             multiline=True, prompt_continuation="... ",
-            placeholder="Press Alt+Enter (Alt+Shift+Enter on Windows) to send message"
+            placeholder=placeholder_text
         )
         self.logger.debug("Prompt session initialized with history and completer.")
 
