@@ -260,7 +260,7 @@ class GitManager:
         if ret != 0:
             self.logger.error(f"{COLORS['RED']}Failed to git add files: {stderr}{RESET}")
             return None
-        self.logger.info(f"GIT: Staged changes for: {COLORS['CYAN']}{', '.join(sorted(files_rel))}{RESET}")
+        self.logger.debug(f"GIT: Staged changes for: {COLORS['CYAN']}{', '.join(sorted(files_rel))}{RESET}")
 
         # Commit
         ret, stdout_commit, stderr_commit = self._run_git_command(

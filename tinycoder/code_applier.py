@@ -289,7 +289,7 @@ class CodeApplier:
                 needs_write = True
             
             if needs_write:
-                self.logger.info(f"Writing final changes to {COLORS['CYAN']}{rel_path}{RESET}...")
+                self.logger.debug(f"Writing final changes to {COLORS['CYAN']}{rel_path}{RESET}...")
                 if self.file_manager.write_file(abs_path, final_content_in_memory):
                     modified_files_on_disk.add(rel_path)
                     if rel_path in files_created_in_this_run:

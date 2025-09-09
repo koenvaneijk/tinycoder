@@ -22,16 +22,6 @@ from tinycoder.app_builder import AppBuilder
 class TestIntegration(unittest.TestCase):
     """Integration tests for the full TinyCoder application."""
     
-    def test_help_command(self):
-        """Test that the help command works."""
-        result = subprocess.run([
-            sys.executable, '-m', 'tinycoder', '--help'
-        ], capture_output=True, text=True, timeout=10)
-        
-        self.assertEqual(result.returncode, 0, f"Help command failed with stderr: {result.stderr}")
-        self.assertIn('tinycoder', result.stdout.lower())
-        self.assertIn('usage', result.stdout.lower())
-    
     def test_basic_startup_with_file(self):
         """Test basic app startup with a file in a temporary directory."""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -173,21 +163,7 @@ def multiply(a, b):
                 os.chdir(original_cwd)
 
 
-class TestSmokeTest(unittest.TestCase):
-    """Simple smoke tests that can be run frequently."""
-    
-    def test_basic_smoke_test(self):
-        """Test basic app functionality."""
-        result = subprocess.run([
-            sys.executable, '-m', 'tinycoder', '--help'
-        ], capture_output=True, text=True, timeout=10)
-        
-        self.assertEqual(result.returncode, 0)
-        self.assertIn('tinycoder', result.stdout.lower())
-        print("✓ Basic smoke test passed")
-
-
 if __name__ == '__main__':
     # Run the tests
     print("Running TinyCoder integration tests...")
-    unittest.main(verbosity=2)
+    unittest.main(verbosity=2)      

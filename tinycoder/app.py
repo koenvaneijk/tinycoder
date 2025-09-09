@@ -29,6 +29,11 @@ from tinycoder.docker_automation import DockerAutomation
 import tinycoder.config as config
 
 
+from tinycoder.ui.log_formatter import (
+    COLORS as FmtColors,
+    RESET,
+)
+
 @dataclass
 class AppState:
     mode: str = "code"
