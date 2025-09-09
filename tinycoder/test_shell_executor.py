@@ -1,114 +1,179 @@
+import unittest
+from unittest.mock import MagicMock, patch, call
 import logging
-import shlex
-import subprocess
-from pathlib import Path
-from typing import Optional
 
+from tinycoder.shell_executor import ShellExecutor
 from tinycoder.chat_history import ChatHistoryManager
 
 
-class ShellExecutor:
-    """Handles the execution of shell commands prefixed with '!'."""
+class TestShellExecutor(unittest.TestCase):
 
-    def __init__(self, logger: logging.Logger, history_manager: ChatHistoryManager, git_root: Optional[str]):
-        """
-        Initializes the ShellExecutor.
+    def setUp(self):
+        self.mock_logger = MagicMock(spec=logging.Logger)
+        self.mock_history_manager = MagicMock(spec=ChatHistoryManager)
+        self.git_root = "/fake/git/root"
+        self.executor = ShellExecutor(self.mock_logger, self.mock_history_manager, self.git_root)
 
-        Args:
-            logger: The logger instance for outputting messages.
-            history_manager: The chat history manager to record command output if requested.
-            git_root: The root directory of the git repository, if available.
-                      Used as the current working directory for commands.
-        """
-        self.logger = logger
-        self.history_manager = history_manager
-        self.git_root = git_root
+    def test_init(self):
+        self.assertIs(self.executor.logger, self.mock_logger)
+        self.assertIs(self.executor.history_manager, self.mock_history_manager)
+        self.assertEqual(self.executor.git_root, self.git_root)
 
-    def execute(self, command_with_prefix: str, non_interactive: bool) -> bool:
-        """
-        Executes a shell command.
+    def test_execute_empty_command(self):
+        result = self.executor.execute("!", False)
+        self.mock_logger.error.assert_called_once_with("Usage: !<shell_command>")
+        self.assertTrue(result)
 
-        Args:
-            command_with_prefix: The full command string, including the '!' prefix (e.g., "!ls -la").
-            non_interactive: If True, suppresses prompts (e.g., for adding output to context).
+    def test_execute_command_with_only_spaces(self):
+        result = self.executor.execute("! ", False)
+        self.mock_logger.error.assert_called_once_with("Usage: !<shell_command>")
+        self.assertTrue(result)
 
-        Returns:
-            True if the command was recognized and an attempt was made to execute it (or an error reported).
-            This indicates that the input has been "handled" for the main app loop.
-        """
-        cmd_str = command_with_prefix[1:].strip()
-        if not cmd_str:
-            self.logger.error("Usage: !<shell_command>")
-            return True  # Handled by showing error, continue main loop
+    @patch('tinycoder.shell_executor.subprocess.run')
+    @patch('tinycoder.shell_executor.Path')
+    def test_execute_successful_command(self, mock_path_class, mock_subprocess_run):
+        mock_subprocess_run.return_value.stdout = "output"
+        mock_subprocess_run.return_value.stderr = ""
+        mock_subprocess_run.return_value.returncode = 0
 
-        self.logger.info(f"Executing shell command: {cmd_str}")
-        cmd_args: list[str] = [] # Ensure cmd_args is defined for FileNotFoundError block
-        try:
-            cmd_args = shlex.split(cmd_str)
-            cwd = Path(self.git_root) if self.git_root else Path.cwd()
-            
-            result = subprocess.run(
-                cmd_args,
-                capture_output=True,
-                text=True,
-                check=False,  # Don't raise exception on non-zero exit code
-                cwd=cwd,
-            )
+        mock_cwd_path = MagicMock()
+        mock_path_class.return_value = mock_cwd_path
 
-            command_output_parts = []
-            stdout_content = result.stdout.strip() if result.stdout else ""
-            stderr_content = result.stderr.strip() if result.stderr else ""
+        with patch('builtins.print') as mock_print, \
+             patch('builtins.input', return_value='n') as mock_input:
+            result = self.executor.execute("!echo test", False)
 
-            if stdout_content:
-                command_output_parts.append(f"--- stdout ---\n{stdout_content}")
-            if stderr_content:
-                command_output_parts.append(f"--- stderr ---\n{stderr_content}")
+        self.mock_logger.info.assert_any_call(f"Executing shell command: echo test")
+        mock_subprocess_run.assert_called_once_with(
+            ['echo', 'test'],
+            capture_output=True,
+            text=True,
+            check=False,
+            cwd=mock_cwd_path
+        )
+        mock_print.assert_any_call("--- Shell Command Output ---")
+        mock_print.assert_any_call("output")
+        mock_print.assert_any_call("--- End Shell Command Output ---")
+        self.mock_history_manager.add_message.assert_not_called()
+        self.assertTrue(result)
 
-            combined_output = "\n".join(command_output_parts)
-            full_output_for_history = (
-                f"Output of shell command: `{cmd_str}`\n{combined_output}"
-            )
+    @patch('tinycoder.shell_executor.subprocess.run')
+    @patch('tinycoder.shell_executor.Path')
+    def test_execute_command_with_non_zero_exit_code(self, mock_path_class, mock_subprocess_run):
+        mock_subprocess_run.return_value.stdout = "output"
+        mock_subprocess_run.return_value.stderr = "error message"
+        mock_subprocess_run.return_value.returncode = 1
 
-            # Print output/error to console
-            print("--- Shell Command Output ---")
-            if stdout_content:
-                print(stdout_content)  # Use plain print for console
-            if stderr_content:
-                # Using logger.error for stderr to get consistent formatting/coloring
-                self.logger.error(f"Shell command stderr:\n{stderr_content}")
-            if result.returncode != 0:
-                self.logger.warning(
-                    f"Shell command '{cmd_str}' exited with code {result.returncode}"
-                )
-            print("--- End Shell Command Output ---")
+        mock_cwd_path = MagicMock()
+        mock_path_class.return_value = mock_cwd_path
 
-            if combined_output and not non_interactive:
-                try:
-                    # Use built-in input for this prompt
-                    add_to_context_input = input(
-                        "Add shell command output to chat context? (y/N): "
-                    )
-                except EOFError: # Handle non-interactive scenarios where input might fail
-                    add_to_context_input = "n"
-                    print() # Newline after simulated EOF
-                except KeyboardInterrupt:
-                    self.logger.info("\nShell output addition to context cancelled.")
-                    add_to_context_input = "n"
-                
-                if add_to_context_input.lower() == "y":
-                    self.history_manager.add_message(
-                        "tool", full_output_for_history
-                    )
-                    self.logger.info("Shell command output added to chat context.")
-            
-            return True  # Command was handled
+        with patch('builtins.print') as mock_print, \
+             patch('builtins.input', return_value='n') as mock_input:
+            result = self.executor.execute("!ls nonexistent", False)
 
-        except FileNotFoundError:
-            # cmd_args might not be populated if shlex.split failed, but cmd_args[0] relies on it.
-            # Use cmd_str for a more robust error message if cmd_args is empty.
-            command_name = cmd_args[0] if cmd_args else cmd_str.split()[0] if cmd_str else "Unknown"
-            self.logger.error(f"Shell command not found: {command_name}")
-            return True  # Command was "handled" by reporting an error
-        except Exception as e:
-            self.logger.error(f"Error executing shell command '{cmd_str}': {e}", exc_info=self.logger.isEnabledFor(logging.DEBUG))
-            return True  # Command was "handled" by reporting an error
+        self.mock_logger.warning.assert_called_once_with("Shell command 'ls nonexistent' exited with code 1")
+        self.assertTrue(result)
+
+    @patch('tinycoder.shell_executor.subprocess.run')
+    @patch('tinycoder.shell_executor.Path')
+    def test_execute_command_user_chooses_to_add_to_context(self, mock_path_class, mock_subprocess_run):
+        mock_subprocess_run.return_value.stdout = "output"
+        mock_subprocess_run.return_value.stderr = ""
+        mock_subprocess_run.return_value.returncode = 0
+
+        mock_cwd_path = MagicMock()
+        mock_path_class.return_value = mock_cwd_path
+
+        with patch('builtins.print') as mock_print, \
+             patch('builtins.input', return_value='y') as mock_input:
+            result = self.executor.execute("!echo test", False)
+
+        self.mock_history_manager.add_message.assert_called_once_with(
+            "tool", "Output of shell command: `echo test`\n--- stdout ---\noutput"
+        )
+        self.mock_logger.info.assert_called_with("Shell command output added to chat context.")
+        self.assertTrue(result)
+
+    @patch('tinycoder.shell_executor.subprocess.run')
+    @patch('tinycoder.shell_executor.Path')
+    def test_execute_command_in_non_interactive_mode(self, mock_path_class, mock_subprocess_run):
+        mock_subprocess_run.return_value.stdout = "output"
+        mock_subprocess_run.return_value.stderr = ""
+        mock_subprocess_run.return_value.returncode = 0
+
+        mock_cwd_path = MagicMock()
+        mock_path_class.return_value = mock_cwd_path
+
+        with patch('builtins.print') as mock_print:
+            result = self.executor.execute("!echo test", True)
+
+        self.mock_history_manager.add_message.assert_not_called()
+        self.assertTrue(result)
+
+    @patch('tinycoder.shell_executor.subprocess.run')
+    @patch('tinycoder.shell_executor.Path')
+    def test_execute_command_file_not_found_error(self, mock_path_class, mock_subprocess_run):
+        mock_subprocess_run.side_effect = FileNotFoundError
+
+        mock_cwd_path = MagicMock()
+        mock_path_class.return_value = mock_cwd_path
+
+        with patch('builtins.print') as mock_print:
+            result = self.executor.execute("!nonexistentcommand", False)
+
+        self.mock_logger.error.assert_called_once_with("Shell command not found: nonexistentcommand")
+        self.assertTrue(result)
+
+    @patch('tinycoder.shell_executor.subprocess.run')
+    @patch('tinycoder.shell_executor.Path')
+    def test_execute_command_generic_exception_during_subprocess(self, mock_path_class, mock_subprocess_run):
+        mock_subprocess_run.side_effect = Exception("Generic error")
+
+        mock_cwd_path = MagicMock()
+        mock_path_class.return_value = mock_cwd_path
+
+        with patch('builtins.print') as mock_print:
+            result = self.executor.execute("!echo test", False)
+
+        self.mock_logger.error.assert_called_once()
+        self.assertIn("Error executing shell command 'echo test': Generic error", self.mock_logger.error.call_args[0][0])
+        self.assertTrue(result)
+
+    @patch('tinycoder.shell_executor.subprocess.run')
+    @patch('tinycoder.shell_executor.Path')
+    def test_execute_command_user_input_eof_error(self, mock_path_class, mock_subprocess_run):
+        mock_subprocess_run.return_value.stdout = "output"
+        mock_subprocess_run.return_value.stderr = ""
+        mock_subprocess_run.return_value.returncode = 0
+
+        mock_cwd_path = MagicMock()
+        mock_path_class.return_value = mock_cwd_path
+
+        with patch('builtins.print') as mock_print, \
+             patch('builtins.input', side_effect=EOFError) as mock_input:
+            result = self.executor.execute("!echo test", False)
+
+        self.mock_history_manager.add_message.assert_not_called()
+        self.assertTrue(result)
+
+    @patch('tinycoder.shell_executor.subprocess.run')
+    @patch('tinycoder.shell_executor.Path')
+    def test_execute_command_user_input_keyboard_interrupt(self, mock_path_class, mock_subprocess_run):
+        mock_subprocess_run.return_value.stdout = "output"
+        mock_subprocess_run.return_value.stderr = ""
+        mock_subprocess_run.return_value.returncode = 0
+
+        mock_cwd_path = MagicMock()
+        mock_path_class.return_value = mock_cwd_path
+
+        with patch('builtins.print') as mock_print, \
+             patch('builtins.input', side_effect=KeyboardInterrupt) as mock_input:
+            result = self.executor.execute("!echo test", False)
+
+        self.mock_logger.info.assert_any_call("\nShell output addition to context cancelled.")
+        self.mock_history_manager.add_message.assert_not_called()
+        self.assertTrue(result)
+
+
+if __name__ == '__main__':
+    unittest.main()
