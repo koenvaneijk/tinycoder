@@ -9,7 +9,7 @@ import sys
 import tempfile
 import os
 import asyncio
-import pytest
+import unittest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from tinycoder.app_builder import AppBuilder
 
 
-class TestIntegration:
+class TestIntegration(unittest.TestCase):
     """Integration tests for the full TinyCoder application."""
     
     def test_help_command(self):
@@ -28,9 +28,9 @@ class TestIntegration:
             sys.executable, '-m', 'tinycoder', '--help'
         ], capture_output=True, text=True, timeout=10)
         
-        assert result.returncode == 0, f"Help command failed with stderr: {result.stderr}"
-        assert 'tinycoder' in result.stdout.lower()
-        assert 'usage' in result.stdout.lower()
+        self.assertEqual(result.returncode, 0, f"Help command failed with stderr: {result.stderr}")
+        self.assertIn('tinycoder', result.stdout.lower())
+        self.assertIn('usage', result.stdout.lower())
     
     def test_basic_startup_with_file(self):
         """Test basic app startup with a file in a temporary directory."""
@@ -54,7 +54,7 @@ class TestIntegration:
                 ], capture_output=True, text=True, timeout=30)
                 
                 # Should not crash - return code 0 or 1 is acceptable
-                assert result.returncode in [0, 1], f"App crashed with return code {result.returncode}, stderr: {result.stderr}"
+                self.assertIn(result.returncode, [0, 1], f"App crashed with return code {result.returncode}, stderr: {result.stderr}")
                 
             finally:
                 os.chdir(original_cwd)
@@ -87,13 +87,13 @@ class TestIntegration:
                 app = builder.build()
                 
                 # Verify basic functionality
-                assert app is not None
-                assert app.file_manager is not None
-                assert app.history_manager is not None
+                self.assertIsNotNone(app)
+                self.assertIsNotNone(app.file_manager)
+                self.assertIsNotNone(app.history_manager)
                 
                 # Check that the file was added
                 files_in_context = app.file_manager.get_files()
-                assert 'test.py' in files_in_context
+                self.assertIn('test.py', files_in_context)
                 
             finally:
                 os.chdir(original_cwd)
@@ -127,7 +127,7 @@ def multiply(a, b):
                 ], capture_output=True, text=True, timeout=30)
                 
                 # Should complete without hanging
-                assert result.returncode in [0, 1], f"Non-interactive mode failed: {result.stderr}"
+                self.assertIn(result.returncode, [0, 1], f"Non-interactive mode failed: {result.stderr}")
                 
             finally:
                 os.chdir(original_cwd)
@@ -146,7 +146,7 @@ def multiply(a, b):
                 ], capture_output=True, text=True, timeout=10)
                 
                 # Should show error but not crash the entire Python process
-                assert result.returncode != 0  # Should fail
+                self.assertNotEqual(result.returncode, 0)  # Should fail
                 
             finally:
                 os.chdir(original_cwd)
@@ -167,26 +167,27 @@ def multiply(a, b):
                 ], capture_output=True, text=True, timeout=10)
                 
                 # Should not crash
-                assert result.returncode in [0, 1]
+                self.assertIn(result.returncode, [0, 1])
                 
             finally:
                 os.chdir(original_cwd)
 
 
-def test_smoke_test():
-    """A simple smoke test that can be run frequently."""
-    """Test basic app functionality."""
-    result = subprocess.run([
-        sys.executable, '-m', 'tinycoder', '--help'
-    ], capture_output=True, text=True, timeout=10)
+class TestSmokeTest(unittest.TestCase):
+    """Simple smoke tests that can be run frequently."""
     
-    assert result.returncode == 0
-    assert 'tinycoder' in result.stdout.lower()
-    print("✓ Basic smoke test passed")
+    def test_basic_smoke_test(self):
+        """Test basic app functionality."""
+        result = subprocess.run([
+            sys.executable, '-m', 'tinycoder', '--help'
+        ], capture_output=True, text=True, timeout=10)
+        
+        self.assertEqual(result.returncode, 0)
+        self.assertIn('tinycoder', result.stdout.lower())
+        print("✓ Basic smoke test passed")
 
 
 if __name__ == '__main__':
-    # Run a simple smoke test
-    print("Running TinyCoder smoke tests...")
-    test_smoke_test()
-    print("✅ All smoke tests passed!")
+    # Run the tests
+    print("Running TinyCoder integration tests...")
+    unittest.main(verbosity=2)

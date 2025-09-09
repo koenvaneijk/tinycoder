@@ -21,11 +21,11 @@ def run_simple_test():
 
 
 def run_comprehensive_test():
-    """Run the comprehensive integration test with pytest."""
+    """Run the comprehensive integration test with unittest."""
     print("Running comprehensive integration tests...")
     try:
         result = subprocess.run([
-            sys.executable, '-m', 'pytest', 'tinycoder/test_integration.py', '-v'
+            sys.executable, '-m', 'tinycoder.test_integration'
         ], capture_output=True, text=True)
         
         if result.returncode == 0:
@@ -36,10 +36,9 @@ def run_comprehensive_test():
             print(result.stdout)
             print(result.stderr)
             return False
-    except FileNotFoundError:
-        print("⚠️  pytest not found, skipping comprehensive tests")
-        print("Install with: pip install pytest")
-        return True
+    except Exception as e:
+        print(f"⚠️  Error running comprehensive tests: {e}")
+        return False
 
 
 def run_smoke_test():
