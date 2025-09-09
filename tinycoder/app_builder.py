@@ -193,7 +193,8 @@ class AppBuilder:
         completer = PTKCommandCompleter(self.file_manager, self.git_manager)
         self.prompt_session = PromptSession(
             history=FileHistory(str(history_file)), completer=completer,
-            multiline=True, prompt_continuation="... "
+            multiline=True, prompt_continuation="... ",
+            placeholder="Press Alt+Enter (Alt+Shift+Enter on Windows) to send message"
         )
         self.logger.debug("Prompt session initialized with history and completer.")
 
