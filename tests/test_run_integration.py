@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
 Run all integration tests for TinyCoder.
-This is a wrapper script that runs tests from the tests/ directory.
 """
 
 import subprocess
@@ -12,7 +11,7 @@ from pathlib import Path
 def run_simple_test():
     """Run the simple integration test."""
     print("Running simple integration test...")
-    result = subprocess.run([sys.executable, 'tests/test_simple_integration.py'], capture_output=True, text=True)
+    result = subprocess.run([sys.executable, 'test_simple_integration.py'], capture_output=True, text=True)
     if result.returncode == 0:
         print("✅ Simple integration test passed")
         return True
@@ -26,7 +25,7 @@ def run_comprehensive_test():
     print("Running comprehensive integration tests...")
     try:
         result = subprocess.run([
-            sys.executable, '-m', 'unittest', 'tests.test_integration'
+            sys.executable, '-m', 'tinycoder.test_integration'
         ], capture_output=True, text=True)
         
         if result.returncode == 0:
