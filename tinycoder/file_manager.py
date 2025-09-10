@@ -227,7 +227,7 @@ class FileManager:
 
                 final_json_content = py_to_ipynb(content, original_notebook_content)
                 # py_to_ipynb produces a JSON string with '\n'. No special handling needed.
-                abs_path.write_text(final_json_content, encoding="utf-8")
+                abs_path.write_text(final_json_content, encoding="utf-8", newline='')
 
             else:
                 # Original logic for other files, slightly improved
@@ -244,7 +244,7 @@ class FileManager:
                         # Fallback if reading bytes fails, use normalized content
                         pass  # content remains with \n
 
-                abs_path.write_text(final_content, encoding="utf-8")
+                abs_path.write_text(final_content, encoding="utf-8", newline='')
 
             return True
         except Exception as e:
