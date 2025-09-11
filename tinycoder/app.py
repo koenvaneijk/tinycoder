@@ -341,6 +341,8 @@ class App:
             last_role = msg["role"]
 
         # Use the LLM response processor to handle the actual LLM interaction
+        # Right before sending to the LLM
+        self.logger.info("Thinking...")
         return self.llm_processor.process(final_messages, self.state.mode, self.state.use_streaming)
 
     def _git_add_commit(self, paths_to_commit: Optional[List[str]] = None):
