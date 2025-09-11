@@ -206,7 +206,7 @@ class AppBuilder:
             enter_key = "↵"
             modifier = "Alt"
         
-        placeholder_text = f"Write your instructions and submit with {modifier}+{enter_key}"
+        placeholder_text = f"Write your instructions and submit with {modifier}+{enter_key} — start typing to dismiss"
         
         self.prompt_session = PromptSession(
             history=FileHistory(str(history_file)), completer=completer,
