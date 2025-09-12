@@ -14,8 +14,8 @@ from tinycoder.edit_parser import EditParser
 from tinycoder.file_manager import FileManager
 from tinycoder.git_manager import GitManager
 from tinycoder.input_preprocessor import InputPreprocessor
-from tinycoder.llms.base import LLMClient
 from tinycoder.llm_response_processor import LLMResponseProcessor
+import zenllm as llm
 from tinycoder.prompt_builder import PromptBuilder
 from tinycoder.repo_map import RepoMap
 from tinycoder.rule_manager import RuleManager
@@ -51,7 +51,6 @@ class App:
     def __init__(
         self,
         logger: logging.Logger,
-        client: LLMClient,
         model: str,
         git_manager: GitManager,
         git_root: Optional[str],
@@ -70,7 +69,8 @@ class App:
         """Initializes the App with its dependencies."""
         self.state = AppState()
         self.logger = logger
-        self.client = client
+        
+
         self.model = model
         self.git_manager = git_manager
         self.git_root = git_root
@@ -99,7 +99,6 @@ class App:
 
         # Initialize LLM response processor
         self.llm_processor = LLMResponseProcessor(
-            client=self.client,
             model=self.model,
             style=self.style,
             logger=self.logger
@@ -617,15 +616,16 @@ class App:
 
         history_for_files = [{"role": "user", "content": instruction}]
         try:
-            response_content, error_message = self.client.generate_content(
-                system_prompt=system_prompt, history=history_for_files
+            resp = llm.chat(
+                [("system", system_prompt), ("user", instruction)],
+                model=self.model,
             )
+            response_content = resp.text or ""
         except KeyboardInterrupt:
             self.logger.info("\nLLM file suggestion cancelled.")
             return None  # Return None on cancellation to indicate user wants to exit
-
-        if error_message:
-            self.logger.error(f"Error asking LLM for files: {error_message}")
+        except Exception as e:
+            self.logger.error(f"Error asking LLM for files: {e}")
             return []
         if not response_content:
             self.logger.warning("LLM did not suggest any files.")

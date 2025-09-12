@@ -13,7 +13,8 @@ from tinycoder.edit_parser import EditParser
 from tinycoder.file_manager import FileManager
 from tinycoder.git_manager import GitManager
 from tinycoder.input_preprocessor import InputPreprocessor
-from tinycoder.llms import create_llm_client
+
+
 from tinycoder.prompt_builder import PromptBuilder
 from tinycoder.repo_map import RepoMap
 from tinycoder.rule_manager import RuleManager
@@ -55,7 +56,6 @@ class AppBuilder:
 
         app = App(
             logger=self.logger,
-            client=self.client,
             model=self.model,
             git_manager=self.git_manager,
             git_root=self.git_root,
@@ -100,15 +100,9 @@ class AppBuilder:
         self.logger.debug("Logging setup complete.")
 
     def _init_llm_client(self) -> None:
-        try:
-            self.client = create_llm_client(self.model_arg)
-            self.model = self.client.model
-            self.logger.debug(f"LLM Client initialized with model: {self.model}")
-        except ValueError as e:
-            self.logger.error(f"Failed to initialize LLM client: {e}", exc_info=True)
-            print(f"{FmtColors['RED']}Error: Failed to initialize LLM client. {e}{RESET}", file=sys.stderr)
-            print("Please check model name or API key environment variables.", file=sys.stderr)
-            sys.exit(1)
+        import os
+        self.model = self.model_arg or os.getenv("ZENLLM_DEFAULT_MODEL") or "gpt-4o-mini"
+        self.logger.debug(f"Using zenllm with model: {self.model}")
 
     def _setup_git(self) -> None:
         self.git_manager = GitManager()
