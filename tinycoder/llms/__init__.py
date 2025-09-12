@@ -8,6 +8,7 @@ from .anthropic import AnthropicClient # Import AnthropicClient
 from .together_ai import TogetherAIClient, DEFAULT_TOGETHER_MODEL # Import TogetherAIClient
 from .groq import GroqClient # Import GroqClient
 from .openai import OpenAIClient, DEFAULT_OPENAI_MODEL # Import OpenAIClient
+from .xai import XAIClient, DEFAULT_XAI_MODEL  # Import X.ai client
 
 from typing import Optional
 
@@ -22,6 +23,7 @@ __all__ = [
     "TogetherAIClient", # Add TogetherAIClient to __all__
     "GroqClient", # Add GroqClient to __all__
     "OpenAIClient", # Add OpenAIClient to __all__
+    "XAIClient", # Add X.ai client to __all__
 ]
 
 logger = logging.getLogger(__name__)
@@ -91,6 +93,19 @@ def create_llm_client(model: Optional[str]) -> LLMClient:
             resolved_model_name = client.model
         except Exception as e:
             raise ValueError(f"Error initializing Groq client for model '{model}': {e}") from e
+    elif model and (model == "xai" or model.startswith("xai-") or model.startswith("grok-")):
+        logger.debug(f"Attempting to initialize X.ai client with model: {model}")
+        try:
+            if model == "xai":
+                actual_model = DEFAULT_XAI_MODEL
+            elif model.startswith("xai-"):
+                actual_model = model[len("xai-"):]
+            else:
+                actual_model = model  # "grok-..." passed as-is
+            client = XAIClient(model=actual_model)
+            resolved_model_name = client.model
+        except Exception as e:
+            raise ValueError(f"Error initializing X.ai client for model '{model}': {e}") from e
     elif model and (model.startswith("openai-") or model.startswith("gpt-") or model.startswith("o3-") or model.startswith("o1-")):
         logger.debug(f"Attempting to initialize OpenAI client with model: {model}")
         try:
