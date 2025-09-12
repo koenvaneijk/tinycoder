@@ -18,6 +18,7 @@ setuptools.setup(
     include_package_data=True,
     install_requires=[
         "prompt_toolkit",
+        "zenllm"
     ],
     entry_points={
         "console_scripts": [
