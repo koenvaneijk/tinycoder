@@ -29,7 +29,7 @@ TinyCoder is a Python-based tool designed to help you interact with Large Langua
     *   **Customizable Repo Map Exclusions:** Fine-tune the `RepoMap` by adding or removing exclusion patterns for files/directories via `/repomap exclude add|remove|list`.
     *   **Code Snippet Context:** Quickly add specific functions or classes to the context using `@path/to/file.py::EntityName` syntax in your prompts (e.g., `@app.py::MyClass`).
     *   **Smart Prompts:** Constructs detailed prompts using file content and repo structure (`PromptBuilder`).
-*   **🤖 Multiple LLM Support:** Works with **Google Gemini**, **DeepSeek**, **Anthropic**, **Together AI**, **Groq**, and **Ollama**. Configure via `--provider` and `--model` flags, or environment variables (`GEMINI_API_KEY`, `DEEPSEEK_API_KEY`, `ANTHROPIC_API_KEY`, `TOGETHER_API_KEY`, `GROQ_API_KEY`).
+*   **🤖 Multiple LLM Support:** Works with **Google Gemini**, **DeepSeek**, **Anthropic**, **Together AI**, **Groq**, **X.ai**, and **Ollama**. Configure via `--provider` and `--model` flags, or environment variables (`GEMINI_API_KEY`, `DEEPSEEK_API_KEY`, `ANTHROPIC_API_KEY`, `TOGETHER_API_KEY`, `GROQ_API_KEY`, `XAI_API_KEY`).
 *   **✏️ Safe Code Editing:**
     *   Parses LLM responses using a structured XML format (`EditParser`).
     *   Applies changes with user confirmation and diff previews (`CodeApplier`).
@@ -101,6 +101,7 @@ pip install -e .
     *   Anthropic: `ANTHROPIC_API_KEY`
     *   Together AI: `TOGETHER_API_KEY`
     *   Groq: `GROQ_API_KEY`
+    *   X.ai: `XAI_API_KEY`
 *   Ollama runs locally and does not require an API key.
 *   You can also set `OLLAMA_HOST` if your Ollama instance is not at the default `http://localhost:11434`.
 
@@ -163,12 +164,14 @@ tinycoder --provider deepseek --model deepseek-reasoner
 tinycoder --provider ollama --model llama3
 tinycoder --provider anthropic --model claude-3-sonnet-20240229
 tinycoder --provider groq --model llama3-8b-8192
+tinycoder --provider xai --model grok-code-fast-1
 
 # If --provider is omitted, --model assumes Ollama or uses legacy prefixes
 tinycoder --model llama3 # Assumes Ollama provider
 tinycoder --model gemini-2.5-pro # Uses legacy prefix detection
 tinycoder --model deepseek-reasoner # Uses legacy prefix detection
 tinycoder --model groq-llama3-8b-8192 # Uses legacy prefix detection
+tinycoder --model xai-grok-code-fast-1 # Uses legacy prefix detection
 # tinycoder --model my-custom-ollama-model # Assumes Ollama provider
 
 # Use the legacy flag (still supported)
