@@ -298,6 +298,85 @@ class CommandHandler:
             run_coverage_summary(self.write_history_func, self.git_manager, self.logger)
             return True, None
 
+        elif command == "/stats":
+            # Analyze git log stats by keyword in commit subjects
+            if not self.git_manager.is_repo():
+                self.logger.error("Not in a git repository or Git is unavailable, cannot compute stats.")
+                return True, None
+
+            # Parse options: --keyword, --branch (support '=', space, and quoted values)
+            keyword = "tinycoder"
+            branch_opt = None
+            if args_str:
+                kw_match = re.search(r'--keyword(?:=|\s+)(?:"([^"]+)"|\'([^\']+)\'|(\S+))', args_str)
+                if kw_match:
+                    keyword = next(g for g in kw_match.groups() if g).strip()
+                br_match = re.search(r'--branch(?:=|\s+)(?:"([^"]+)"|\'([^\']+)\'|(\S+))', args_str)
+                if br_match:
+                    branch_opt = next(g for g in br_match.groups() if g).strip()
+
+            # Resolve branch to analyze
+            branch_to_use = branch_opt or self.git_manager.get_current_branch() or "HEAD"
+
+            self.logger.info(f"🔍 Analyzing repository history on branch '{branch_to_use}' for keyword: '{keyword}'...")
+
+            # Run git log with stats and a unique commit separator
+            ret, stdout, stderr = self.git_manager._run_git_command(
+                ["log", branch_to_use, "--stat", "--pretty=format:---COMMIT_SEPARATOR---%n%s"]
+            )
+            if ret != 0:
+                self.logger.error(f"Error executing git command: {stderr.strip()}")
+                return True, None
+
+            parts = stdout.split('---COMMIT_SEPARATOR---')
+            commits = parts[1:] if len(parts) > 1 else []
+
+            if not commits:
+                self.logger.info("No commits found in the repository.")
+                return True, None
+
+            keyword_lines_changed = 0
+            other_lines_changed = 0
+
+            for commit_block in commits:
+                lines = commit_block.strip().split('\n')
+                commit_message = lines[0] if lines else ""
+
+                commit_changes = 0
+                for line in lines:
+                    # Match summary lines like: "2 files changed, 10 insertions(+), 5 deletions(-)"
+                    if ("files changed" in line) or ("file changed" in line):
+                        ins_m = re.search(r'(\d+)\s+insertion', line)
+                        del_m = re.search(r'(\d+)\s+deletion', line)
+                        if ins_m:
+                            commit_changes += int(ins_m.group(1))
+                        if del_m:
+                            commit_changes += int(del_m.group(1))
+                        break
+
+                if keyword.lower() in commit_message.lower():
+                    keyword_lines_changed += commit_changes
+                else:
+                    other_lines_changed += commit_changes
+
+            total_lines_changed = keyword_lines_changed + other_lines_changed
+            percentage = (keyword_lines_changed / total_lines_changed) * 100 if total_lines_changed else 0.0
+
+            # Output summary
+            self.logger.info("\n--- Git Contribution Analysis ---")
+            self.logger.info(f"Total lines changed by '{keyword}': {keyword_lines_changed:,}")
+            self.logger.info(f"Total lines changed by others:   {other_lines_changed:,}")
+            self.logger.info("---------------------------------")
+            self.logger.info(f"Total lines changed in repository: {total_lines_changed:,}")
+            self.logger.info(f"Percentage of code by '{keyword}': {percentage:.2f}% ✅")
+
+            # Persist concise summary to chat history
+            self.write_history_func(
+                "tool",
+                f"Git stats: keyword='{keyword}' on '{branch_to_use}': {keyword_lines_changed} vs {other_lines_changed} (total {total_lines_changed}) -> {percentage:.2f}%"
+            )
+            return True, None
+
         elif command == "/docker":
             if not self.docker_manager or not self.docker_manager.is_available:
                 self.logger.error("Docker integration is not available or enabled.")
@@ -454,6 +533,7 @@ class CommandHandler:
   /code                       Switch to CODE mode (make edits).
   /tests                      Run unit tests (runs in container if docker-compose.yml is present).
   /coverage                   Run coverage summary (unittest discovery; summary per file and total).
+  /stats [--keyword <word>] [--branch <name>] Show git contribution stats by keyword in commit subjects.
   /docker ps                  Show status of Docker containers.
   /docker logs <service>      Stream logs from a Docker container.
   /docker restart <service>   Restart a Docker container.

@@ -215,6 +215,19 @@ class GitManager:
             self.logger.error(f"{COLORS['RED']}Failed to get last commit hash: {stderr}{RESET}")
             return None
 
+    def get_current_branch(self) -> Optional[str]:
+        """Get the current branch name (or 'HEAD' if detached)."""
+        if not self.is_repo():
+            self.logger.debug("Cannot get current branch: Not in a git repository or git unavailable.")
+            return None
+        ret, stdout, stderr = self._run_git_command(["rev-parse", "--abbrev-ref", "HEAD"])
+        if ret == 0:
+            branch = stdout.strip()
+            return branch if branch else None
+        else:
+            self.logger.error(f"{COLORS['RED']}Failed to get current branch: {stderr}{RESET}")
+            return None
+
     def get_files_changed_in_commit(self, commit_hash: str) -> List[str]:
         """Gets relative paths of files changed in a specific commit."""
         if not self.is_repo():
