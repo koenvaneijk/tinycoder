@@ -43,6 +43,7 @@ def py_to_ipynb(py_content: str, original_notebook_content: str) -> str:
     Converts a '#%%' Python script back to a Jupyter Notebook JSON string,
     preserving metadata from the original notebook.
     """
+    original_valid = True
     try:
         original_data = json.loads(original_notebook_content)
         # Ensure base structure is valid
@@ -50,12 +51,19 @@ def py_to_ipynb(py_content: str, original_notebook_content: str) -> str:
             raise ValueError("Original notebook content is not a valid notebook.")
     except (json.JSONDecodeError, ValueError):
         # If original is invalid, create a skeleton notebook structure.
+        original_valid = False
         original_data = {
             "cells": [],
             "metadata": {},
             "nbformat": 4,
             "nbformat_minor": 5,
         }
+
+    def _split_lines_with_optional_trim(text: str, trim_last_newline: bool):
+        lines = text.splitlines(keepends=True)
+        if trim_last_newline and lines and lines[-1].endswith("\n"):
+            lines[-1] = lines[-1][:-1]
+        return lines
 
     new_cells = []
     # Split by the separator at the beginning of a line.
@@ -76,7 +84,9 @@ def py_to_ipynb(py_content: str, original_notebook_content: str) -> str:
                     "execution_count": None,
                     "metadata": {},
                     "outputs": [],
-                    "source": source_str.splitlines(keepends=True),
+                    # When original is valid, normalize to no trailing newline on the last line,
+                    # matching ipynb_to_py's rstrip-induced representation.
+                    "source": _split_lines_with_optional_trim(source_str, trim_last_newline=original_valid),
                 }
             )
         elif header.strip() == "#%% [markdown]":
@@ -95,7 +105,7 @@ def py_to_ipynb(py_content: str, original_notebook_content: str) -> str:
                 {
                     "cell_type": "markdown",
                     "metadata": {},
-                    "source": uncommented_source.splitlines(keepends=True),
+                    "source": _split_lines_with_optional_trim(uncommented_source, trim_last_newline=original_valid),
                 }
             )
 
