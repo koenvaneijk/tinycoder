@@ -69,18 +69,6 @@ class InputPreprocessor:
             self.logger.error(f"Error extracting code for {entity_name} from {file_path_str}: {e}", exc_info=True)
             return None
 
-    def check_for_file_mentions(self, inp: str):
-        """Placeholder: Checks for file mentions in user input."""
-        # TODO: Implement logic to find potential file paths in `inp`
-        # and maybe suggest adding them or print a warning.
-        pass  # Currently does nothing
-
-    def check_for_urls(self, inp: str) -> str:
-        """Placeholder: Checks for URLs in user input."""
-        # TODO: Implement logic to find URLs. Could potentially fetch content
-        # or just return the input string unchanged.
-        return inp  # Currently returns input unchanged
-
     def process(self, inp: str) -> str:
         """
         Processes user input: checks for file mentions, URLs, and @entity mentions.
@@ -162,10 +150,6 @@ class InputPreprocessor:
 
         if extracted_snippets_text:
             modified_inp += "".join(extracted_snippets_text)
-        
-        # Existing file mentions and URLs checks
-        self.check_for_file_mentions(modified_inp) 
-        modified_inp = self.check_for_urls(modified_inp)
 
         if modified_inp != original_inp and extracted_snippets_text:
              self.logger.info("Input preprocessed: @-mentions found and code injected.")
