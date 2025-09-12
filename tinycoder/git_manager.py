@@ -100,15 +100,25 @@ class GitManager:
             return -1, "", str(e)
 
     def _find_git_root(self) -> Optional[str]:
-        """Check *only* the current working directory for a .git folder."""
-        cwd = Path.cwd()
-        git_dir = cwd / ".git"
-        if git_dir.is_dir(): # Check if .git exists and is a directory
-            self.logger.debug(f"Found .git directory at: {COLORS['GREEN']}{cwd}{RESET}")
-            return str(cwd)
-        else:
-            self.logger.debug(f"No .git directory found in current directory: {cwd}")
-            return None
+        """Search the current directory and its parents for a .git folder, up to the filesystem root."""
+        try:
+            start_path = Path.cwd().resolve()
+        except Exception:
+            # Fallback in case resolve() fails for any reason
+            start_path = Path.cwd()
+
+        for candidate in (start_path, *start_path.parents):
+            git_dir = candidate / ".git"
+            try:
+                if git_dir.is_dir():  # Check if .git exists and is a directory
+                    self.logger.debug(f"Found .git directory at: {COLORS['GREEN']}{candidate}{RESET}")
+                    return str(candidate)
+            except Exception:
+                # If we can't stat this path for any reason, skip it
+                continue
+
+        self.logger.debug(f"No .git directory found from {start_path} up to filesystem root.")
+        return None
 
     def initialize_repo(self) -> bool:
         """Initializes a git repository in the current working directory."""
