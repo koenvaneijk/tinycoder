@@ -86,6 +86,11 @@ def load_user_preference_model() -> Optional[str]:
             return f"together-{name}"
         elif provider == "groq":
             return f"groq-{name}"
+        elif provider == "xai":
+            # Accept either grok-* (native X.ai model IDs) or xai-* prefixed shortcuts
+            if name.startswith("grok-") or name.startswith("xai-"):
+                return name
+            return f"xai-{name}"
         else:
             return name  # For ollama or other formats
             
@@ -106,6 +111,7 @@ def save_user_preference(provider_class: str, model_name: str) -> None:
         "DeepSeekClient": "deepseek",
         "OllamaClient": "ollama",
         "GroqClient": "groq",
+        "XAIClient": "xai",
     }
     
     provider = provider_mapping.get(provider_class)
@@ -123,6 +129,8 @@ def save_user_preference(provider_class: str, model_name: str) -> None:
             name = name[9:]  # Remove "together-" prefix
         elif provider == "groq" and name.startswith("groq-"):
             name = name[5:]  # Remove "groq-" prefix
+        elif provider == "xai" and name.startswith("xai-"):
+            name = name[4:]  # Remove "xai-" prefix
             
         # Store in structured format for flexibility
         prefs["model"] = {

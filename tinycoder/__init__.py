@@ -58,7 +58,7 @@ def main():
     # New provider selection argument
     parser.add_argument(
         "--provider",
-        choices=["anthropic", "gemini", "ollama", "together", "deepseek", "groq", "openai"],
+        choices=["anthropic", "gemini", "ollama", "together", "deepseek", "groq", "openai", "xai"],
         default=default_provider,
         help="The LLM provider to use (default: auto-detected or from TINYCODER_PROVIDER env var)",
     )
@@ -124,6 +124,12 @@ def main():
         elif args.provider == "groq":
             model_name = args.model or "moonshotai/kimi-k2-instruct"
             model_str = f"groq-{model_name}"
+        elif args.provider == "xai":
+            model_name = args.model or "grok-code-fast-1"
+            if model_name.startswith("grok-") or model_name.startswith("xai-"):
+                model_str = model_name
+            else:
+                model_str = f"xai-{model_name}"
         elif args.provider == "ollama":
             model_str = args.model or "qwen3:14b"
         elif args.provider == "openai":
