@@ -35,3 +35,10 @@ class LLMClient(ABC):
         """
         pass
 
+    def get_last_usage(self) -> Optional[Dict]:
+        """
+        Optional hook for clients to expose token usage details.
+        Expected shape: {'input_tokens': int, 'output_tokens': int} or provider-specific keys.
+        """
+        return None
+

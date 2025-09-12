@@ -43,15 +43,14 @@ class LLMResponseProcessor:
                 history_to_send = messages_to_send
                 self.logger.warning("System prompt not found at the beginning of messages for LLM.")
 
-            # Calculate input tokens
+            # Calculate approximate input tokens (adjust later if real usage is available)
             input_chars = sum(len(msg["content"]) for msg in history_to_send) + len(system_prompt_text)
-            input_tokens = round(input_chars / 4)
-            self.total_input_tokens += input_tokens
-            
-            self.logger.debug(f"Approx. input tokens to send: {input_tokens}")
+            approx_input_tokens = round(input_chars / 4)
+            self.total_input_tokens += approx_input_tokens
+            self.logger.debug(f"Approx. input tokens to send: {approx_input_tokens}")
 
-            response_content = None
-            error_message = None
+            response_content: Optional[str] = None
+            error_message: Optional[str] = None
 
             # Handle streaming mode
             if use_streaming and hasattr(self.client, 'generate_content_stream'):
@@ -75,12 +74,42 @@ class LLMResponseProcessor:
                 # For non-streaming, print the response
                 if not (use_streaming and hasattr(self.client, 'generate_content_stream')):
                     self._print_response(response_content, mode)
-                
-                # Track output tokens
-                output_tokens = round(len(response_content) / 4)
-                self.total_output_tokens += output_tokens
-                self.logger.debug(f"Approx. response tokens: {output_tokens}")
-                
+
+                # Track approximate output tokens; adjust later if usage is available
+                approx_output_tokens = round(len(response_content) / 4)
+                self.total_output_tokens += approx_output_tokens
+                self.logger.debug(f"Approx. response tokens: {approx_output_tokens}")
+
+                # Prefer real token usage if the client exposes it (e.g., zenllm)
+                try:
+                    get_usage = getattr(self.client, "get_last_usage", None)
+                    usage = get_usage() if callable(get_usage) else None
+                except Exception:
+                    usage = None
+
+                if isinstance(usage, dict):
+                    in_tok = usage.get("input_tokens")
+                    out_tok = usage.get("output_tokens")
+                    # Common alternates
+                    if in_tok is None and "prompt_tokens" in usage:
+                        in_tok = usage.get("prompt_tokens")
+                    if out_tok is None and "completion_tokens" in usage:
+                        out_tok = usage.get("completion_tokens")
+
+                    # Adjust totals using the real counts if present
+                    try:
+                        if in_tok is not None:
+                            in_tok = int(in_tok)
+                            self.total_input_tokens += (in_tok - approx_input_tokens)
+                            self.logger.debug(f"Adjusted input tokens to provider-reported value: {in_tok}")
+                        if out_tok is not None:
+                            out_tok = int(out_tok)
+                            self.total_output_tokens += (out_tok - approx_output_tokens)
+                            self.logger.debug(f"Adjusted output tokens to provider-reported value: {out_tok}")
+                    except Exception:
+                        # If conversion fails, keep approximations
+                        pass
+
                 return response_content
 
         except Exception as e:
