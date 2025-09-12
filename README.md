@@ -221,7 +221,7 @@ tinycoder --code "Implement the function foo in service.py using utils.bar"
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please read the `CONTRIBUTING.md` file (if it exists) for guidelines. (Placeholder - create this file if needed)
+Contributions are welcome! Please read the `CONTRIBUTING.md` file.
 
 ---
 
