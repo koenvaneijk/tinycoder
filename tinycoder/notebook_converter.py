@@ -59,13 +59,13 @@ def py_to_ipynb(py_content: str, original_notebook_content: str) -> str:
 
     new_cells = []
     # Split by the separator at the beginning of a line.
-    script_cells = re.split(r"\n\n(?=#%%)", py_content.strip())
+    script_cells = re.split(r"\n\n(?=#%%)", py_content)
 
     for script_cell in script_cells:
         if not script_cell.strip():
             continue
 
-        parts = script_cell.strip().split("\n", 1)
+        parts = script_cell.split("\n", 1)
         header = parts[0]
         source_str = parts[1] if len(parts) > 1 else ""
 
