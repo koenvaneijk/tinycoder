@@ -152,7 +152,7 @@ def main():
     coder = builder.build()
 
     # Save the model preference for next time
-    save_user_preference(coder.client.__class__.__name__, coder.model)
+    # save_user_preference(coder.client.__class__.__name__, coder.model)
 
     if args.code:
         coder.mode = "code"
