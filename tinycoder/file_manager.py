@@ -45,34 +45,46 @@ class FileManager:
         self.logger = logging.getLogger(__name__)
 
     def get_abs_path(self, fname: str) -> Optional[Path]:
-        """Converts a relative or absolute path string to an absolute Path object,
-        validating it's within the project scope (git root or cwd)."""
-        path = Path(fname)
-        base_path = self.root if self.root else Path.cwd()
+        """
+        Converts a user-provided path to an absolute, canonical Path within the project root.
 
-        if path.is_absolute():
-            abs_path = path.resolve()
-            # Check if it's within the root directory
-            try:
-                abs_path.relative_to(base_path)
-                return abs_path
-            except ValueError:
-                self.logger.error(
-                    f"Absolute path is outside the project root ({base_path}): {fname}"
-                )
-                return None
-        else:
-            # Relative path
-            abs_path = (base_path / path).resolve()
-            # Double-check it's under the base path after resolving symlinks etc.
-            try:
-                abs_path.relative_to(base_path)
-                return abs_path
-            except ValueError:
-                self.logger.error(
-                    f"Path resolves outside the project root ({base_path}): {fname}"
-                )
-                return None
+        Security:
+        - Resolves symlinks and normalizes ".." traversal.
+        - Verifies the final resolved path is contained by the project base (git root or CWD).
+        - Rejects any path that escapes the project via traversal or symlink jumps.
+        """
+        if not fname or not str(fname).strip():
+            self.logger.error("Empty path provided.")
+            return None
+
+        # Always compare against the resolved base to prevent aliasing via symlinks.
+        base_path = (self.root if self.root else Path.cwd()).resolve()
+
+        # Expand '~' to user home; it will be rejected if outside base_path.
+        try:
+            raw_path = Path(fname).expanduser()
+        except Exception:
+            raw_path = Path(fname)
+
+        try:
+            if raw_path.is_absolute():
+                candidate = raw_path.resolve(strict=False)
+            else:
+                candidate = (base_path / raw_path).resolve(strict=False)
+        except Exception as e:
+            self.logger.error(f"Failed to resolve path '{fname}': {e}")
+            return None
+
+        # Enforce containment within project base after full resolution.
+        try:
+            candidate.relative_to(base_path)
+        except ValueError:
+            self.logger.error(
+                f"Path is outside the project root ({base_path}): {fname}"
+            )
+            return None
+
+        return candidate
 
     def _get_rel_path(self, abs_path: Path) -> str:
         """Gets the path relative to the git root or cwd."""

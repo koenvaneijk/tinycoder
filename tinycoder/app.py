@@ -442,22 +442,42 @@ class App:
         
         valid_files_to_potentially_add = []
         non_existent_files_requested = []
+        out_of_scope_files_requested = []
+        not_regular_files_requested = []
         already_in_context_files = []
 
         for fname_rel in requested_files_from_llm:
             abs_path = self.file_manager.get_abs_path(fname_rel)
-            if abs_path and abs_path.exists():
-                if fname_rel not in self.file_manager.get_files():
-                     valid_files_to_potentially_add.append(fname_rel)
-                else:
-                    already_in_context_files.append(fname_rel)
-            else:
+            if abs_path is None:
+                out_of_scope_files_requested.append(fname_rel)
+                continue
+            if not abs_path.exists():
                 non_existent_files_requested.append(fname_rel)
+                continue
+            if not abs_path.is_file():
+                not_regular_files_requested.append(fname_rel)
+                continue
+            if fname_rel not in self.file_manager.get_files():
+                valid_files_to_potentially_add.append(fname_rel)
+            else:
+                already_in_context_files.append(fname_rel)
+
+        if out_of_scope_files_requested:
+            formatted_out_of_scope = [self.formatter.format_error(fname) for fname in out_of_scope_files_requested]
+            self.logger.warning(
+                f"LLM requested path(s) outside the project root (rejected): {', '.join(formatted_out_of_scope)}"
+            )
 
         if non_existent_files_requested:
             formatted_non_existent = [self.formatter.format_error(fname) for fname in non_existent_files_requested]
             self.logger.warning(
                 f"LLM requested non-existent files: {', '.join(formatted_non_existent)}"
+            )
+
+        if not_regular_files_requested:
+            formatted_not_regular = [self.formatter.format_error(fname) for fname in not_regular_files_requested]
+            self.logger.warning(
+                f"LLM requested non-regular files (directories or special files): {', '.join(formatted_not_regular)}"
             )
         
         if already_in_context_files:
@@ -640,26 +660,50 @@ class App:
         # Basic filtering: remove backticks or quotes if LLM included them
         potential_files = [f.strip("`\"' ") for f in potential_files]
 
-        # Filter out files that don't exist in the repository
-        existing_files = []
+        # Filter out files that don't exist or are out of project scope
+        in_scope_existing_files = []
+        out_of_scope_files = []
+        non_existing_files = []
+        not_regular_files = []
+
         for fname in potential_files:
             abs_path = self.file_manager.get_abs_path(fname)
-            if abs_path and abs_path.exists():
-                existing_files.append(fname)
-            else:
-                self.logger.warning(
-                    f"Ignoring non-existent file suggested by LLM: {self.formatter.format_error(fname)}"
-                )
-        
-        if existing_files:
-            colored_existing_files = [f"{self.formatter.format_filename(f)}" for f in existing_files]
+            if abs_path is None:
+                out_of_scope_files.append(fname)
+                continue
+            if not abs_path.exists():
+                non_existing_files.append(fname)
+                continue
+            if not abs_path.is_file():
+                not_regular_files.append(fname)
+                continue
+            in_scope_existing_files.append(fname)
+
+        if out_of_scope_files:
+            formatted = [self.formatter.format_error(f) for f in out_of_scope_files]
+            self.logger.warning(
+                f"Ignoring path(s) outside the project root: {', '.join(formatted)}"
+            )
+        if non_existing_files:
+            formatted = [self.formatter.format_error(f) for f in non_existing_files]
+            self.logger.warning(
+                f"Ignoring non-existent file(s) suggested by LLM: {', '.join(formatted)}"
+            )
+        if not_regular_files:
+            formatted = [self.formatter.format_error(f) for f in not_regular_files]
+            self.logger.warning(
+                f"Ignoring non-regular path(s) (directories or special files): {', '.join(formatted)}"
+            )
+
+        if in_scope_existing_files:
+            colored_existing_files = [f"{self.formatter.format_filename(f)}" for f in in_scope_existing_files]
             self.logger.info(
                 f"LLM suggested files (after filtering): {', '.join(colored_existing_files)}",
             )
         else:
             self.logger.info("LLM suggested no existing files after filtering.")
             
-        return existing_files
+        return in_scope_existing_files
 
     def init_before_message(self):
         """Resets state before processing a new user message."""
