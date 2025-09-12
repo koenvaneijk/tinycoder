@@ -26,6 +26,8 @@ class RepoMap:
     def __init__(self, root: Optional[str]):
         self.root = Path(root) if root else Path.cwd()
         self.logger = logging.getLogger(__name__)
+        # In-memory cache: key=(rel_path, kind) -> (mtime, size, data)
+        self._summary_cache: Dict[Tuple[str, str], Tuple[float, int, object]] = {}
 
         self.exclusions_config_path = self.root / self._EXCLUSIONS_DIR_NAME / self._EXCLUSIONS_FILE_NAME
         self.user_exclusions: Set[str] = set()
@@ -295,6 +297,11 @@ class RepoMap:
         Focuses on key tags, IDs, title, links, and scripts.
         Returns a list of strings representing the structure.
         """
+        # Try cached result first
+        cached = self._cache_get(file_path, "html-structure")
+        if cached is not None:
+            return cached
+
         structure_lines = []
         try:
             content = file_path.read_text(encoding="utf-8", errors="replace")
@@ -303,7 +310,59 @@ class RepoMap:
             structure_lines = parser.get_structure()
         except Exception as e:
             self.logger.error(f"Error parsing HTML file {file_path}: {e}")
+
+        # Save to cache
+        self._cache_set(file_path, "html-structure", structure_lines)
         return structure_lines
+
+    # Caching helpers
+    def _rel_str(self, path: Path) -> str:
+        """Return path relative to repo root as a string."""
+        try:
+            return str(path.relative_to(self.root))
+        except Exception:
+            return str(path)
+
+    def _get_mtime_size(self, path: Path) -> Tuple[float, int]:
+        """Safely get (mtime, size) for a file path."""
+        try:
+            st = path.stat()
+            return (st.st_mtime, st.st_size)
+        except Exception:
+            return (-1.0, -1)
+
+    def _cache_get(self, path: Path, kind: str):
+        """
+        Get cached data for a (path, kind) if mtime and size match.
+        Returns the cached data or None.
+        """
+        key = (self._rel_str(path), kind)
+        entry = self._summary_cache.get(key)
+        if not entry:
+            return None
+        mtime, size = self._get_mtime_size(path)
+        if mtime == entry[0] and size == entry[1]:
+            return entry[2]
+        # Stale; drop and miss
+        self._summary_cache.pop(key, None)
+        return None
+
+    def _cache_set(self, path: Path, kind: str, data: object) -> None:
+        """Store data in cache for (path, kind) keyed by current mtime/size."""
+        mtime, size = self._get_mtime_size(path)
+        key = (self._rel_str(path), kind)
+        self._summary_cache[key] = (mtime, size, data)
+
+    def get_definitions_cached(self, file_path: Path):
+        """
+        Cached variant of get_definitions() using (mtime,size) to validate entries.
+        """
+        cached = self._cache_get(file_path, "py-defs")
+        if cached is not None:
+            return cached
+        data = self.get_definitions(file_path)
+        self._cache_set(file_path, "py-defs", data)
+        return data
 
     # --- Nested HTML Parser Classes ---
     # Using nested classes to keep them contained within RepoMap
@@ -1152,6 +1211,26 @@ class RepoMap:
                         break
             return lines or ["  - (no details)"]
 
+        # Wrap summarizers with an mtime/size-based cache
+        def _cached(kind: str, fn):
+            def _wrapped(p: Path):
+                cached = self._cache_get(p, kind)
+                if cached is not None:
+                    return cached
+                data = fn(p)
+                self._cache_set(p, kind, data)
+                return data
+            return _wrapped
+
+        _summarize_html = _cached("html", _summarize_html)
+        _summarize_js = _cached("js", _summarize_js)
+        _summarize_css = _cached("css", _summarize_css)
+        _summarize_json = _cached("json", _summarize_json)
+        _summarize_yaml = _cached("yaml", _summarize_yaml)
+        _summarize_dockerfile = _cached("dockerfile", _summarize_dockerfile)
+        _summarize_md = _cached("md", _summarize_md)
+        _summarize_toml = _cached("toml", _summarize_toml)
+
         # Skip helpers
         def _skip_js_css_minified(path: Path) -> bool:
             n = path.name.lower()
@@ -1167,7 +1246,7 @@ class RepoMap:
                 continue  # Skip files already in chat
 
             is_test_file = file_path.name.startswith("test_") and file_path.name.endswith(".py")
-            all_file_definitions = self.get_definitions(file_path)
+            all_file_definitions = self.get_definitions_cached(file_path)
 
             current_file_map_lines_for_this_file = []
             module_docstring_line_str = ""
