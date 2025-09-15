@@ -161,7 +161,7 @@ class App:
             for i, fname in enumerate(suggested_files):
                 self.logger.info(f"  {i+1}. {self.formatter.format_filename(fname)}")
 
-            confirm_prompt = f"{self.formatter.format_warning('Add files to context? (y/N, or list indices like \'1,3\'): ')}"
+            confirm_prompt = "Add files to context? (y/N, or list indices like '1,3'): "
             confirm = prompt_user_input(confirm_prompt).strip().lower()
             if not confirm: # User cancelled
                 self.logger.info(self.formatter.format_warning("\nFile addition cancelled by user."))
@@ -505,7 +505,7 @@ class App:
         for i, fname in enumerate(valid_files_to_potentially_add):
             self.logger.info(f"  {i+1}. {self.formatter.format_filename(fname)}")
         
-        confirm_prompt = f"{self.formatter.format_warning('Add these files to context? (y/N, or list indices like \'1,3\'): ')}"
+        confirm_prompt = "Add these files to context? (y/N, or list indices like '1,3'): "
         confirm = (await self._prompt_for_confirmation(confirm_prompt)).strip().lower()
 
         if not confirm: # Handles cancellation from prompt_user_input
@@ -619,7 +619,7 @@ class App:
                     combined_errors = "\n".join(error_messages)
                     self.logger.error(combined_errors)
 
-                    fix_lint = await self._prompt_for_confirmation(f"{self.formatter.format_warning('Attempt to fix lint errors? (y/N): ')}")
+                    fix_lint = await self._prompt_for_confirmation("Attempt to fix lint errors? (y/N): ")
                     if fix_lint.lower() == "y":
                         self.state.reflected_message = combined_errors
             
