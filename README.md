@@ -99,6 +99,87 @@ pip install -e .
 
 ---
 
+## 🐳 Docker: Quick start
+
+Run tinycoder inside a container that edits your current directory, with minimal assumptions.
+
+1) Build the image
+```bash
+docker build -t tinycoder:local .
+```
+
+2) Provide API keys (simple: a reusable .env file)
+Create a file at ~/.tinycoder.env with your keys:
+```bash
+# Required (pick what's relevant for your provider)
+GEMINI_API_KEY=...
+DEEPSEEK_API_KEY=...
+ANTHROPIC_API_KEY=...
+TOGETHER_API_KEY=...
+GROQ_API_KEY=...
+XAI_API_KEY=...
+
+# Optional (for local Ollama or custom host)
+# OLLAMA_HOST=http://localhost:11434
+```
+Keep this file private.
+
+3) One-time shell alias/function so tinycoder edits your current directory
+- Bash/Zsh (Linux/macOS):
+  ```bash
+  tinycoder() {
+    # Add Linux-only user mapping to avoid root-owned files on Linux.
+    USER_FLAG=""
+    if [ "$(uname -s)" = "Linux" ]; then
+      USER_FLAG="--user $(id -u):$(id -g)"
+    fi
+
+    ENV_FILE="$HOME/.tinycoder.env"
+    ENV_ARG=""
+    if [ -f "$ENV_FILE" ]; then
+      ENV_ARG="--env-file $ENV_FILE"
+    fi
+
+    docker run --rm -it \
+      $USER_FLAG \
+      $ENV_ARG \
+      -v "$PWD":/workspace \
+      -w /workspace \
+      tinycoder:local "$@"
+  }
+  ```
+  - Add the function above to your ~/.bashrc or ~/.zshrc to persist it.
+
+- PowerShell (Windows):
+  ```powershell
+  function tinycoder {
+    param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Args)
+
+    $envFile = "$HOME\.tinycoder.env"
+    $envArg = @()
+    if (Test-Path $envFile) {
+      $envArg = @("--env-file", $envFile)
+    }
+
+    docker run --rm -it `
+      @envArg `
+      -v "${PWD}:/workspace" `
+      -w /workspace `
+      tinycoder:local $Args
+  }
+  ```
+  - Add to your PowerShell profile ($PROFILE) to persist.
+
+Notes and optional tweaks:
+- Linux permissions: If you see permission issues on Fedora/RHEL with SELinux enforcing, add :Z to the mount:
+  - `-v "$PWD":/workspace:Z`
+- Git config inside the container (optional):
+  - `-v "$HOME/.gitconfig":/root/.gitconfig:ro`
+- Persist tinycoder preferences/history between runs (optional):
+  - `-v "$HOME/.config/tinycoder":/root/.config/tinycoder`
+- Docker automation features (optional): If you want tinycoder to interact with your host Docker from inside the container, mount the Docker socket (security-sensitive):
+  - `-v /var/run/docker.sock:/var/run/docker.sock`
+
 ### 📱 Using on Android (Termux)
 
 TinyCoder runs effectively on Android devices using the [Termux](https://termux.dev/en/) terminal emulator, allowing you to have a powerful AI coding assistant in your pocket.
