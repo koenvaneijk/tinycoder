@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM python:3.11-slim
+FROM python:3.13-slim
 
 # Minimal deps: git for repo operations, ca-certs for TLS
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy project and install
 WORKDIR /opt/tinycoder
 COPY . .
-RUN pip install --no-cache-dir --upgrade pip &amp;&amp; \
+RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir .
 
 # Default working directory is where the host project will be mounted
