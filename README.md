@@ -13,7 +13,7 @@
   <strong>Your command-line AI coding assistant 🤖 integrated with Git! Pure Python, minimal dependencies.</strong>
 </p>
 
-TinyCoder is a Python-based tool designed to help you interact with Large Language Models (LLMs) for coding tasks directly within your terminal. It analyzes your codebase, builds context for the LLM, applies suggested code changes safely, and integrates seamlessly with your Git workflow. Minimal dependencies, maximum productivity!
+TinyCoder is a Python-based tool designed to help you interact with Large Language Models (LLMs) for coding tasks directly within your terminal. It analyzes your codebase, builds context for the LLM, applies suggested code changes safely, and integrates seamlessly with your Git workflow. Minimal dependencies, maximum productivity! Built on ZenLLM for a unified, streaming-friendly multi-provider API: https://github.com/koenvaneijk/zenllm
 
 ![TinyCoder Demo](https://github.com/koenvaneijk/tinycoder/blob/main/screenshots/demo.gif?raw=true)
 
@@ -29,7 +29,7 @@ TinyCoder is a Python-based tool designed to help you interact with Large Langua
     *   **Customizable Repo Map Exclusions:** Fine-tune the `RepoMap` by adding or removing exclusion patterns for files/directories via `/repomap exclude add|remove|list`.
     *   **Code Snippet Context:** Quickly add specific functions or classes to the context using `@path/to/file.py::EntityName` syntax in your prompts (e.g., `@app.py::MyClass`).
     *   **Smart Prompts:** Constructs detailed prompts using file content and repo structure (`PromptBuilder`).
-*   **🤖 Multiple LLM Support:** Works with **Google Gemini**, **DeepSeek**, **Anthropic**, **Together AI**, **Groq**, **X.ai**, and **Ollama**. Configure via `--provider` and `--model` flags, or environment variables (`GEMINI_API_KEY`, `DEEPSEEK_API_KEY`, `ANTHROPIC_API_KEY`, `TOGETHER_API_KEY`, `GROQ_API_KEY`, `XAI_API_KEY`).
+*   **🤖 Multiple LLM Support (powered by ZenLLM):** Works with **Google Gemini**, **DeepSeek**, **Anthropic**, **Together AI**, **Groq**, **X.ai**, and **Ollama**. Configure via `--provider` and `--model` flags, or environment variables (`GEMINI_API_KEY`, `DEEPSEEK_API_KEY`, `ANTHROPIC_API_KEY`, `TOGETHER_API_KEY`, `GROQ_API_KEY`, `XAI_API_KEY`). Learn more: https://github.com/koenvaneijk/zenllm
 *   **✏️ Safe Code Editing:**
     *   Parses LLM responses using a structured XML format (`EditParser`).
     *   Applies changes with user confirmation and diff previews (`CodeApplier`).
@@ -96,6 +96,7 @@ pip install -e .
     *   X.ai: `XAI_API_KEY`
 *   Ollama runs locally and does not require an API key.
 *   You can also set `OLLAMA_HOST` if your Ollama instance is not at the default `http://localhost:11434`.
+*   Optional (powered by ZenLLM): set `ZENLLM_DEFAULT_MODEL` to choose a default model and `ZENLLM_FALLBACK` to define a failover chain (e.g., `export ZENLLM_FALLBACK="openai:gpt-4o-mini,xai:grok-2-mini,together:meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"`).
 
 ---
 
