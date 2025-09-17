@@ -758,9 +758,8 @@ class App:
             # Prepare model/provider/base_url for zenllm call
             call_model = self.model
             p = (self.current_provider or "").lower() if getattr(self, "current_provider", None) else ""
-            if p == "anthropic" and call_model.startswith("claude-"):
-                call_model = call_model[len("claude-"):]
-            elif p in ("groq", "together", "gemini", "deepseek") and call_model.startswith(f"{p}-"):
+            # Do NOT strip for providers with native prefixed IDs (anthropic/claude-*, gemini/gemini-*, deepseek/deepseek-*)
+            if p in ("groq", "together") and call_model.startswith(f"{p}-"):
                 call_model = call_model[len(p) + 1:]
             elif p == "xai" and call_model.startswith("xai-"):
                 call_model = call_model[len("xai-"):]

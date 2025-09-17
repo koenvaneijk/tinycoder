@@ -27,14 +27,23 @@ class LLMResponseProcessor:
         self.total_cost_usd: float = 0.0
 
     def _raw_model_for_call(self) -> str:
-        """Return the model id stripped of any redundant provider prefix when provider/base_url are explicit."""
+        """Return the model id stripped of any redundant provider prefix when provider/base_url are explicit.
+        
+        Do NOT strip for providers whose native model IDs include their prefix:
+        - anthropic: claude-*
+        - gemini: gemini-*
+        - deepseek: deepseek-*
+        
+        Only strip for providers that don't require the provider name in the model id:
+        - groq: remove leading "groq-"
+        - together: remove leading "together-"
+        - xai: remove leading "xai-" (but keep native "grok-*" as-is)
+        """
         model = self.model or ""
         p = (self.provider or "").lower() if self.provider else ""
         if not p:
             return model
-        if p == "anthropic" and model.startswith("claude-"):
-            return model[len("claude-"):]
-        if p in ("groq", "together", "gemini", "deepseek") and model.startswith(f"{p}-"):
+        if p in ("groq", "together") and model.startswith(f"{p}-"):
             return model[len(p) + 1:]
         if p == "xai" and model.startswith("xai-"):
             return model[len("xai-"):]
