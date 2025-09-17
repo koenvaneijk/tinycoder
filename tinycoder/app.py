@@ -248,19 +248,40 @@ class App:
     def _set_current_model(self, model_id: str, provider_key: Optional[str] = None, base_url: Optional[str] = None) -> None:
         """Update the current model for this session and persist preference."""
         old_model = self.model
-        self.model = model_id
-        # Ensure the LLM processor uses the updated model immediately
+
+        # Canonicalize runtime model based on provider/base_url
+        runtime_model = model_id
+        provider_norm = (provider_key or "").lower() if provider_key else None
+
+        if not base_url and provider_norm:
+            if provider_norm == "groq" and not runtime_model.startswith("groq-"):
+                runtime_model = f"groq-{runtime_model}"
+            elif provider_norm == "together" and not runtime_model.startswith("together-"):
+                runtime_model = f"together-{runtime_model}"
+            elif provider_norm in ("anthropic", "claude") and not runtime_model.startswith("claude-"):
+                runtime_model = f"claude-{runtime_model}"
+            elif provider_norm == "gemini" and not runtime_model.startswith("gemini-"):
+                runtime_model = f"gemini-{runtime_model}"
+            elif provider_norm == "deepseek" and not runtime_model.startswith("deepseek-"):
+                runtime_model = f"deepseek-{runtime_model}"
+            elif provider_norm == "xai":
+                # Accept native X.ai ids that start with grok-; otherwise ensure xai- prefix
+                if not (runtime_model.startswith("grok-") or runtime_model.startswith("xai-")):
+                    runtime_model = f"xai-{runtime_model}"
+
+        # Apply runtime change
+        self.model = runtime_model
         if hasattr(self, "llm_processor"):
-            self.llm_processor.model = model_id
+            self.llm_processor.model = runtime_model
 
         # Log and add a tool message to history
         try:
-            if old_model and old_model != model_id:
-                self.logger.info(f"Switched model: {old_model} -> {model_id}")
+            if old_model and old_model != runtime_model:
+                self.logger.info(f"Switched model: {old_model} -> {runtime_model}")
             else:
-                self.logger.info(f"Switched model to: {model_id}")
-            label = f" ({provider_key})" if provider_key else ""
-            self.history_manager.save_message_to_file_only("tool", f"Switched model to: {model_id}{label}")
+                self.logger.info(f"Switched model to: {runtime_model}")
+            label = f" ({provider_norm})" if provider_norm else ""
+            self.history_manager.save_message_to_file_only("tool", f"Switched model to: {runtime_model}{label}")
         except Exception:
             pass
 
@@ -268,15 +289,40 @@ class App:
         try:
             from tinycoder.preferences import load_user_preferences, save_user_preferences
             prefs = load_user_preferences()
-            if provider_key or base_url:
+
+            # Normalize provider key for persistence (map 'claude' to 'anthropic')
+            provider_to_save = None
+            if provider_norm:
+                provider_to_save = "anthropic" if provider_norm == "claude" else provider_norm
+
+            if base_url and not provider_to_save:
+                # For custom base_url without a known provider, store raw model string
+                prefs["model"] = model_id
+            elif provider_to_save or base_url:
+                # Derive unprefixed name for storage when applicable
+                name_to_save = model_id
+                if provider_to_save == "anthropic" and name_to_save.startswith("claude-"):
+                    name_to_save = name_to_save[len("claude-"):]
+                elif provider_to_save == "gemini" and name_to_save.startswith("gemini-"):
+                    name_to_save = name_to_save[len("gemini-"):]
+                elif provider_to_save == "deepseek" and name_to_save.startswith("deepseek-"):
+                    name_to_save = name_to_save[len("deepseek-"):]
+                elif provider_to_save == "together" and name_to_save.startswith("together-"):
+                    name_to_save = name_to_save[len("together-"):]
+                elif provider_to_save == "groq" and name_to_save.startswith("groq-"):
+                    name_to_save = name_to_save[len("groq-"):]
+                elif provider_to_save == "xai" and name_to_save.startswith("xai-"):
+                    name_to_save = name_to_save[len("xai-"):]
+
                 prefs["model"] = {
-                    "provider": provider_key,
-                    "name": model_id,
-                    "full_name": model_id,
+                    "provider": provider_to_save,
+                    "name": name_to_save,
+                    "full_name": runtime_model,
                     "base_url": base_url,
                 }
             else:
-                prefs["model"] = model_id
+                prefs["model"] = runtime_model
+
             save_user_preferences(prefs)
         except Exception as e:
             # Non-fatal; just log at debug level

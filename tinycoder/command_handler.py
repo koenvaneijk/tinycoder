@@ -618,7 +618,8 @@ class CommandHandler:
 
             chosen_id = model_ids[int(msel) - 1]
             try:
-                self.set_model(chosen_id, pkey if pkey != "custom" else None, base_url)
+                provider_for_persistence = "anthropic" if pkey == "claude" else pkey
+                self.set_model(chosen_id, provider_for_persistence if provider_for_persistence != "custom" else None, base_url)
             except Exception as e:
                 self.logger.error(f"Failed to set model: {e}")
                 return True, None
