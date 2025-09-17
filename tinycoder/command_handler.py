@@ -536,7 +536,7 @@ class CommandHandler:
             providers = [
                 ("openai",  "OpenAI (and compatible)",       ["OPENAI_API_KEY"]),
                 ("groq",    "Groq",                          ["GROQ_API_KEY"]),
-                ("claude",  "Anthropic (Claude)",            ["ANTHROPIC_API_KEY"]),
+                ("anthropic","Anthropic (Claude)",           ["ANTHROPIC_API_KEY"]),
                 ("deepseek","DeepSeek",                      ["DEEPSEEK_API_KEY"]),
                 ("gemini",  "Google Gemini",                 ["GEMINI_API_KEY", "GOOGLE_API_KEY"]),
                 ("together","Together AI",                   ["TOGETHER_API_KEY"]),
@@ -618,8 +618,7 @@ class CommandHandler:
 
             chosen_id = model_ids[int(msel) - 1]
             try:
-                provider_for_persistence = "anthropic" if pkey == "claude" else pkey
-                self.set_model(chosen_id, provider_for_persistence if provider_for_persistence != "custom" else None, base_url)
+                self.set_model(chosen_id, pkey if pkey != "custom" else None, base_url)
             except Exception as e:
                 self.logger.error(f"Failed to set model: {e}")
                 return True, None

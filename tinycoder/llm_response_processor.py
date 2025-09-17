@@ -16,13 +16,29 @@ from prompt_toolkit.utils import get_cwidth
 class LLMResponseProcessor:
     """Handles LLM response generation, streaming, formatting, and usage tracking via zenllm."""
     
-    def __init__(self, model: str, style: Style, logger: logging.Logger):
+    def __init__(self, model: str, style: Style, logger: logging.Logger, provider: Optional[str]=None, base_url: Optional[str]=None):
         self.model = model
+        self.provider = provider
+        self.base_url = base_url
         self.style = style
         self.logger = logger
         self.total_input_tokens = 0
         self.total_output_tokens = 0
         self.total_cost_usd: float = 0.0
+
+    def _raw_model_for_call(self) -> str:
+        """Return the model id stripped of any redundant provider prefix when provider/base_url are explicit."""
+        model = self.model or ""
+        p = (self.provider or "").lower() if self.provider else ""
+        if not p:
+            return model
+        if p == "anthropic" and model.startswith("claude-"):
+            return model[len("claude-"):]
+        if p in ("groq", "together", "gemini", "deepseek") and model.startswith(f"{p}-"):
+            return model[len(p) + 1:]
+        if p == "xai" and model.startswith("xai-"):
+            return model[len("xai-"):]
+        return model
 
     def process(self, messages_to_send: List[Dict[str, str]], mode: str, use_streaming: bool) -> Optional[str]:
         """
@@ -57,7 +73,14 @@ class LLMResponseProcessor:
                 self._adjust_usage_and_cost(final_resp, approx_input_tokens, approx_output_tokens)
                 return response_content
             else:
-                resp = llm.chat(zen_messages, model=self.model)
+                call_model = self._raw_model_for_call()
+                kwargs = {"model": call_model}
+                if self.provider:
+                    kwargs["provider"] = self.provider
+                if self.base_url:
+                    kwargs["base_url"] = self.base_url
+                resp = llm.chat(zen_messages, **kwargs)
+                
                 response_content = (resp.text or "")
                 # Print the response in non-streaming mode
                 self._print_response(response_content, mode)
@@ -119,7 +142,13 @@ class LLMResponseProcessor:
         
         full_response_chunks: List[str] = []
         try:
-            stream = llm.chat(zen_messages, model=self.model, stream=True)
+            call_model = self._raw_model_for_call()
+            kwargs = {"model": call_model, "stream": True}
+            if self.provider:
+                kwargs["provider"] = self.provider
+            if self.base_url:
+                kwargs["base_url"] = self.base_url
+            stream = llm.chat(zen_messages, **kwargs)
             for ev in stream:
                 # Only surface text events to the console
                 if getattr(ev, "type", None) == "text":

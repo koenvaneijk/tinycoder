@@ -86,6 +86,9 @@ class App:
         self.prompt_session = prompt_session
         self.style = style
         self.formatter = AppFormatter()
+        # Track provider/base_url explicitly for zenllm calls
+        self.current_provider: Optional[str] = None
+        self.current_base_url: Optional[str] = None
 
         # Initialize context manager
         self.context_manager = ContextManager(
@@ -101,7 +104,9 @@ class App:
         self.llm_processor = LLMResponseProcessor(
             model=self.model,
             style=self.style,
-            logger=self.logger
+            logger=self.logger,
+            provider=self.current_provider,
+            base_url=self.current_base_url,
         )
 
         # Initialize Docker automation
@@ -269,10 +274,16 @@ class App:
                 if not (runtime_model.startswith("grok-") or runtime_model.startswith("xai-")):
                     runtime_model = f"xai-{runtime_model}"
 
+        # Track provider/base_url explicitly for future calls
+        self.current_provider = ("anthropic" if provider_norm == "claude" else provider_norm) if provider_norm else None
+        self.current_base_url = base_url
+
         # Apply runtime change
         self.model = runtime_model
         if hasattr(self, "llm_processor"):
             self.llm_processor.model = runtime_model
+            self.llm_processor.provider = self.current_provider
+            self.llm_processor.base_url = self.current_base_url
 
         # Log and add a tool message to history
         try:
@@ -280,7 +291,7 @@ class App:
                 self.logger.info(f"Switched model: {old_model} -> {runtime_model}")
             else:
                 self.logger.info(f"Switched model to: {runtime_model}")
-            label = f" ({provider_norm})" if provider_norm else ""
+            label = f" ({self.current_provider})" if self.current_provider else ""
             self.history_manager.save_message_to_file_only("tool", f"Switched model to: {runtime_model}{label}")
         except Exception:
             pass
@@ -725,9 +736,20 @@ class App:
 
         history_for_files = [{"role": "user", "content": instruction}]
         try:
+            # Prepare model/provider/base_url for zenllm call
+            call_model = self.model
+            p = (self.current_provider or "").lower() if getattr(self, "current_provider", None) else ""
+            if p == "anthropic" and call_model.startswith("claude-"):
+                call_model = call_model[len("claude-"):]
+            elif p in ("groq", "together", "gemini", "deepseek") and call_model.startswith(f"{p}-"):
+                call_model = call_model[len(p) + 1:]
+            elif p == "xai" and call_model.startswith("xai-"):
+                call_model = call_model[len("xai-"):]
             resp = llm.chat(
                 [("system", system_prompt), ("user", instruction)],
-                model=self.model,
+                model=call_model,
+                provider=self.current_provider,
+                base_url=getattr(self, "current_base_url", None),
             )
             response_content = resp.text or ""
         except KeyboardInterrupt:

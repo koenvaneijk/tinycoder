@@ -72,6 +72,23 @@ class AppBuilder:
             style=self.style,
         )
 
+        # Initialize provider/base_url from stored preferences if available
+        try:
+            from tinycoder.preferences import load_user_preferences
+            prefs = load_user_preferences()
+            model_info = prefs.get("model")
+            if isinstance(model_info, dict):
+                provider = model_info.get("provider")
+                base_url = model_info.get("base_url")
+                if provider:
+                    app.current_provider = provider
+                    app.llm_processor.provider = provider
+                if base_url:
+                    app.current_base_url = base_url
+                    app.llm_processor.base_url = base_url
+        except Exception:
+            pass
+
         app._add_initial_files(self.files)
         self._log_final_status(app)
         return app
