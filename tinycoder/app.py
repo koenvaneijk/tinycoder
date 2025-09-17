@@ -940,6 +940,21 @@ class App:
         self._update_and_cache_token_breakdown()
 
         # Use logger for startup info, which has its own color formatting.
+        # Show provider aligned with the Model and /help lines
+        provider_display = self.current_provider
+        if not provider_display and self.model:
+            ml = self.model.lower()
+            if ml.startswith("claude-"):
+                provider_display = "anthropic"
+            elif any(ml.startswith(p + "-") for p in ("groq", "together", "gemini", "deepseek", "xai")):
+                provider_display = ml.split("-", 1)[0]
+            elif ml.startswith("grok-"):
+                provider_display = "xai"
+            elif ":" in self.model and "/" not in self.model and " " not in self.model:
+                provider_display = "ollama"
+        provider_display = provider_display or "auto"
+
+        self.logger.info(f"  Provider: {self.formatter.format_success(self.formatter.format_bold(provider_display))}")
         self.logger.info(f"  Model: {self.formatter.format_success(self.formatter.format_bold(self.model))}")
         self.logger.info("  Type /help for commands, or !<cmd> to run shell commands.\n")
 

@@ -7,6 +7,8 @@ import importlib.metadata
 from tinycoder.preferences import save_user_preference, load_user_preference_model, load_user_preferences
 from tinycoder.ui.log_formatter import COLORS, RESET
 
+from typing import Optional
+
 APP_NAME = "tinycoder"
 try:
     __version__ = importlib.metadata.version(APP_NAME)
@@ -168,8 +170,6 @@ def main():
     version_str = f"v{__version__}"
     print(f"{version_color}{version_str: >{art_width}}{RESET}")
 
-    provider_color = COLORS.get("BRIGHT_GREEN", "")
-    print(f"{provider_color}{('Provider: ' + provider_display): >{art_width}}{RESET}")
     print()  # Extra newline for spacing after the art
 
     # Initialize the app
