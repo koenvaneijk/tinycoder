@@ -379,8 +379,27 @@ class App:
         else:
             files_str = "  Files: none"
         
-        # Create multi-line toolbar with files on top line and tokens below
-        toolbar_text = f"{files_str}\n{self.formatter.format_bottom_toolbar(breakdown)}"
+        # Determine provider/model display for toolbar
+        provider_display = self.current_provider
+        if not provider_display and self.model:
+            ml = self.model.lower()
+            if ml.startswith("claude-"):
+                provider_display = "anthropic"
+            elif any(ml.startswith(p + "-") for p in ("groq", "together", "gemini", "deepseek", "xai")):
+                provider_display = ml.split("-", 1)[0]
+            elif ml.startswith("grok-"):
+                provider_display = "xai"
+            elif ":" in self.model and "/" not in self.model and " " not in self.model:
+                provider_display = "ollama"
+        provider_display = provider_display or "auto"
+        provider_model_str = self.formatter.format_provider_model_line(provider_display, self.model)
+        
+        # Create multi-line toolbar with files, tokens, and provider/model info
+        toolbar_text = (
+            f"{files_str}\n"
+            f"{self.formatter.format_bottom_toolbar(breakdown)}\n"
+            f"{provider_model_str}"
+        )
         return toolbar_text
 
     def _update_and_cache_token_breakdown(self) -> None:

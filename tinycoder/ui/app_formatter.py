@@ -47,6 +47,11 @@ class AppFormatter:
         )
         return toolbar_str
     
+    def format_provider_model_line(self, provider: Optional[str], model: str) -> str:
+        """Generate a simple provider/model status line for the bottom toolbar."""
+        provider_display = provider or "auto"
+        return f"  Provider: {provider_display}  Model: {model}"
+    
     def format_mode_prompt(self, mode: str) -> FormattedText:
         """Format the mode indicator for the prompt."""
         mode_str = mode.upper()
