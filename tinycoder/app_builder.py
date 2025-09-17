@@ -34,8 +34,9 @@ from tinycoder.docker_manager import DockerManager
 
 class AppBuilder:
     """Builds the App instance and all its dependencies."""
-    def __init__(self, model: Optional[str], files: List[str], continue_chat: bool, verbose: bool = False):
+    def __init__(self, model: Optional[str], provider: Optional[str], files: List[str], continue_chat: bool, verbose: bool = False):
         self.model_arg = model
+        self.provider_arg = provider
         self.files = files
         self.continue_chat = continue_chat
         self.verbose = verbose
@@ -88,6 +89,11 @@ class AppBuilder:
                     app.llm_processor.base_url = base_url
         except Exception:
             pass
+
+        # If CLI provided a provider, it overrides preferences
+        if getattr(self, "provider_arg", None):
+            app.current_provider = self.provider_arg
+            app.llm_processor.provider = self.provider_arg
 
         app._add_initial_files(self.files)
         self._log_final_status(app)

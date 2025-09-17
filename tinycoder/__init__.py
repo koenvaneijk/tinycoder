@@ -122,7 +122,7 @@ def main():
             model_name = args.model or "Qwen/Qwen3-235B-A22B-fp8-tput"
             model_str = f"together-{model_name}"
         elif args.provider == "groq":
-            model_name = args.model or "moonshotai/kimi-k2-instruct"
+            model_name = args.model or "moonshotai/kimi-k2-instruct-0905"
             model_str = f"groq-{model_name}"
         elif args.provider == "xai":
             model_name = args.model or "grok-code-fast-1"
@@ -134,10 +134,8 @@ def main():
             model_str = args.model or "qwen3:14b"
         elif args.provider == "openai":
             model_name = args.model or "gpt-5"
-            if not model_name.startswith("gpt-") and not model_name.startswith("o3-") and not model_name.startswith("o1-"):
-                model_str = f"openai-{model_name}"
-            else:
-                model_str = model_name
+            # Do not prefix with 'openai-' when provider is explicitly set; zenllm routes via provider param.
+            model_str = model_name
     
     # If no provider specified but model is, assume Ollama
     elif args.model:
@@ -148,7 +146,7 @@ def main():
         model_str = load_user_preference_model()
 
     # Initialize the app
-    builder = AppBuilder(model=model_str, files=args.files, continue_chat=args.continue_chat, verbose=args.verbose)
+    builder = AppBuilder(model=model_str, provider=args.provider, files=args.files, continue_chat=args.continue_chat, verbose=args.verbose)
     coder = builder.build()
 
     # Save the model preference for next time
