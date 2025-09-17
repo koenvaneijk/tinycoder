@@ -101,7 +101,8 @@ class AppBuilder:
 
     def _init_llm_client(self) -> None:
         import os
-        self.model = self.model_arg or os.getenv("ZENLLM_DEFAULT_MODEL") or "gpt-4o-mini"
+        from tinycoder.preferences import load_user_preference_model
+        self.model = self.model_arg or load_user_preference_model() or os.getenv("ZENLLM_DEFAULT_MODEL") or "gpt-4o-mini"
         self.logger.debug(f"Using zenllm with model: {self.model}")
 
     def _setup_git(self) -> None:

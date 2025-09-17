@@ -222,6 +222,8 @@ class App:
             add_repomap_exclusion_func=self.repo_map.add_user_exclusion,
             remove_repomap_exclusion_func=self.repo_map.remove_user_exclusion,
             get_repomap_exclusions_func=self.repo_map.get_user_exclusions,
+            get_model_func=self._get_current_model,
+            set_model_func=self._set_current_model,
         )
         self.logger.debug("CommandHandler initialized.")
 
@@ -238,6 +240,47 @@ class App:
     def _handle_docker_automation(self, modified_files_rel: List[str], non_interactive: bool = False):
         """Handle Docker automation after file modifications."""
         self.docker_automation.handle_modified_files(modified_files_rel, non_interactive)
+
+    def _get_current_model(self) -> str:
+        """Return the current LLM model identifier."""
+        return self.model
+
+    def _set_current_model(self, model_id: str, provider_key: Optional[str] = None, base_url: Optional[str] = None) -> None:
+        """Update the current model for this session and persist preference."""
+        old_model = self.model
+        self.model = model_id
+        # Ensure the LLM processor uses the updated model immediately
+        if hasattr(self, "llm_processor"):
+            self.llm_processor.model = model_id
+
+        # Log and add a tool message to history
+        try:
+            if old_model and old_model != model_id:
+                self.logger.info(f"Switched model: {old_model} -> {model_id}")
+            else:
+                self.logger.info(f"Switched model to: {model_id}")
+            label = f" ({provider_key})" if provider_key else ""
+            self.history_manager.save_message_to_file_only("tool", f"Switched model to: {model_id}{label}")
+        except Exception:
+            pass
+
+        # Persist preference
+        try:
+            from tinycoder.preferences import load_user_preferences, save_user_preferences
+            prefs = load_user_preferences()
+            if provider_key or base_url:
+                prefs["model"] = {
+                    "provider": provider_key,
+                    "name": model_id,
+                    "full_name": model_id,
+                    "base_url": base_url,
+                }
+            else:
+                prefs["model"] = model_id
+            save_user_preferences(prefs)
+        except Exception as e:
+            # Non-fatal; just log at debug level
+            self.logger.debug(f"Could not persist model preference: {e}")
 
 
     def _add_initial_files(self, files: List[str]) -> None:

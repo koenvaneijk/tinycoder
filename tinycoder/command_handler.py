@@ -40,6 +40,8 @@ class CommandHandler:
         add_repomap_exclusion_func: Callable[[str], bool],
         remove_repomap_exclusion_func: Callable[[str], bool],
         get_repomap_exclusions_func: Callable[[], list[str]],
+        get_model_func: Callable[[], str],
+        set_model_func: Callable[[str, Optional[str], Optional[str]], None],
     ):
         """
         Initializes the CommandHandler.
@@ -65,6 +67,8 @@ class CommandHandler:
             add_repomap_exclusion_func: Function to add a path/pattern to repomap exclusions.
             remove_repomap_exclusion_func: Function to remove a path/pattern from repomap exclusions.
             get_repomap_exclusions_func: Function to get the list of current repomap exclusions.
+            get_model_func: Function to get the current model identifier.
+            set_model_func: Function to set the current model (model_id, provider_key, base_url).
         """
         self.file_manager = file_manager
         self.git_manager = git_manager
@@ -86,6 +90,8 @@ class CommandHandler:
         self.add_repomap_exclusion = add_repomap_exclusion_func
         self.remove_repomap_exclusion = remove_repomap_exclusion_func
         self.get_repomap_exclusions = get_repomap_exclusions_func
+        self.get_model = get_model_func
+        self.set_model = set_model_func
 
     # _run_tests method removed
 
@@ -518,6 +524,109 @@ class CommandHandler:
 
             return True, None
 
+        elif command == "/model":
+            from tinycoder.ui.console_interface import prompt_user_input
+            import os
+            try:
+                import zenllm as llm
+            except Exception as e:
+                self.logger.error(f"Could not import zenllm: {e}")
+                return True, None
+
+            providers = [
+                ("openai",  "OpenAI (and compatible)",       ["OPENAI_API_KEY"]),
+                ("groq",    "Groq",                          ["GROQ_API_KEY"]),
+                ("claude",  "Anthropic (Claude)",            ["ANTHROPIC_API_KEY"]),
+                ("deepseek","DeepSeek",                      ["DEEPSEEK_API_KEY"]),
+                ("gemini",  "Google Gemini",                 ["GEMINI_API_KEY", "GOOGLE_API_KEY"]),
+                ("together","Together AI",                   ["TOGETHER_API_KEY"]),
+                ("xai",     "X.ai (Grok)",                   ["XAI_API_KEY"]),
+                ("custom",  "Custom base_url (OpenAI-compatible)", []),
+            ]
+
+            def _key_status(envs):
+                if not envs:
+                    return "n/a", True
+                has_any = any(os.getenv(v) for v in envs)
+                return ("OK" if has_any else "missing"), has_any
+
+            self.logger.info("Select a provider:")
+            for idx, (_k, label, envs) in enumerate(providers, start=1):
+                status_label, _ = _key_status(envs)
+                self.logger.info(f"  {idx}) {label}  [key: {status_label}]")
+            sel = prompt_user_input("Provider number (or Enter to cancel): ").strip()
+            if not sel:
+                return True, None
+            if not sel.isdigit() or not (1 <= int(sel) <= len(providers)):
+                self.logger.warning("Invalid provider selection.")
+                return True, None
+            pkey, plabel, penvs = providers[int(sel) - 1]
+
+            base_url = None
+            if pkey == "custom":
+                base_url = prompt_user_input("Enter base_url (e.g., http://localhost:11434/v1) or Enter to cancel: ").strip()
+                if not base_url:
+                    self.logger.info("Cancelled.")
+                    return True, None
+
+            # Warn if key missing
+            _, has_key = _key_status(penvs)
+            if penvs and not has_key:
+                cont = prompt_user_input("API key appears missing for this provider. Continue anyway? (y/N): ").strip().lower()
+                if cont != "y":
+                    return True, None
+
+            # List models
+            try:
+                if base_url:
+                    models = llm.list_models(base_url=base_url)
+                else:
+                    models = llm.list_models(provider=pkey)
+            except KeyboardInterrupt:
+                self.logger.info("Model listing cancelled.")
+                return True, None
+            except Exception as e:
+                self.logger.error(f"Failed to list models for provider '{pkey}': {e}")
+                return True, None
+
+            model_ids = sorted({getattr(m, "id", str(m)) for m in (models or [])})
+            if not model_ids:
+                self.logger.warning("No models returned by provider.")
+                return True, None
+
+            filt = prompt_user_input("Optional filter substring (Enter to skip): ").strip().lower()
+            if filt:
+                model_ids = [m for m in model_ids if filt in m.lower()]
+                if not model_ids:
+                    self.logger.warning("No models match the filter.")
+                    return True, None
+
+            max_show = 50
+            if len(model_ids) > max_show:
+                self.logger.info(f"Showing first {max_show} of {len(model_ids)} models.")
+                model_ids = model_ids[:max_show]
+
+            self.logger.info("Select a model:")
+            for idx, mid in enumerate(model_ids, start=1):
+                self.logger.info(f"  {idx}) {mid}")
+            msel = prompt_user_input("Model number (or Enter to cancel): ").strip()
+            if not msel:
+                return True, None
+            if not msel.isdigit() or not (1 <= int(msel) <= len(model_ids)):
+                self.logger.warning("Invalid model selection.")
+                return True, None
+
+            chosen_id = model_ids[int(msel) - 1]
+            try:
+                self.set_model(chosen_id, pkey if pkey != "custom" else None, base_url)
+            except Exception as e:
+                self.logger.error(f"Failed to set model: {e}")
+                return True, None
+
+            self.logger.info(f"Switched model to: {chosen_id} ({plabel})")
+            self.write_history_func("tool", f"Switched model to: {chosen_id} ({plabel})")
+            return True, None
+
         elif command == "/help":
             help_text = f"""Available commands:
   /add <file1> ["file 2"]...  Add file(s) to the chat context.
@@ -531,6 +640,7 @@ class CommandHandler:
   /undo                       Undo the last commit made by {self.app_name}.
   /ask                        Switch to ASK mode (answer questions, no edits).
   /code                       Switch to CODE mode (make edits).
+  /model                      Select provider and model interactively.
   /tests                      Run unit tests (runs in container if docker-compose.yml is present).
   /coverage                   Run coverage summary (unittest discovery; summary per file and total).
   /stats [--keyword <word>] [--branch <name>] Show git contribution stats by keyword in commit subjects.
