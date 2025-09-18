@@ -794,8 +794,12 @@ class App:
         out_of_scope_files = []
         non_existing_files = []
         not_regular_files = []
+        history_rel = ".tinycoder.chat.history.md"
 
         for fname in potential_files:
+            if fname == history_rel:
+                self.logger.debug(f"Excluding internal history file from suggestions: {history_rel}")
+                continue
             abs_path = self.file_manager.get_abs_path(fname)
             if abs_path is None:
                 out_of_scope_files.append(fname)
